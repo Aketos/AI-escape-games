@@ -1,0 +1,63 @@
+services:
+  tts:
+    image: moshi-server:latest
+    command: ["worker", "--config", "configs/tts.toml"]
+    build:
+      context: services/moshi-server
+      dockerfile: public.Dockerfile
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=$HUGGING_FACE_HUB_TOKEN
+    volumes:
+      - ./volumes/hf-cache:/root/.cache/huggingface
+      - ./volumes/cargo-registry-tts:/root/.cargo/registry
+      - ./volumes/tts-target:/app/target
+      - ./volumes/uv-cache:/root/.cache/uv
+      - /tmp/models/:/models
+      - ./volumes/tts-logs:/tmp/unmute_logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  stt:
+    image: moshi-server:latest
+    command: ["worker", "--config", "configs/stt.toml"]
+    build:
+      context: services/moshi-server
+      dockerfile: public.Dockerfile
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=$HUGGING_FACE_HUB_TOKEN
+    volumes:
+      - ./volumes/hf-cache:/root/.cache/huggingface
+      - ./volumes/cargo-registry-stt:/root/.cargo/registry
+      - ./volumes/stt-target:/app/target
+      - ./volumes/uv-cache:/root/.cache/uv
+      - /tmp/models/:/models
+      - ./volumes/stt-logs:/tmp/unmute_logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  backend:
+    image: unmute-backend:latest
+    build:
+      context: ./
+      target: hot-reloading
+    ports:
+      - "80:8000"
+    volumes:
+      - ./unmute:/app/unmute
+    environment:
+      - KYUTAI_STT_URL=ws://stt:8080
+      - KYUTAI_TTS_URL=ws://tts:8081
+      - KYUTAI_LLM_URL=https://api.scaleway.ai/v1
+      - KYUTAI_LLM_MODEL=gemma-3-27b-it
+      - KYUTAI_LLM_API_KEY=${SCALEWAY_API_KEY}
+

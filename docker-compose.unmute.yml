@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  stt:
+    build:
+      context: pkg/stt
+      dockerfile: Dockerfile
+    image: kyutai/unmute-stt:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+
+  tts:
+    build:
+      context: pkg/tts
+      dockerfile: Dockerfile
+    image: kyutai/unmute-tts:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+
+  backend:
+    build:
+      context: pkg/backend
+      dockerfile: Dockerfile
+    image: kyutai/unmute-backend:latest
+    restart: unless-stopped
+    ports:
+      - "80:8000"
+    ports:
+      - "80:8000"
+    environment:
+      - KYUTAI_STT_URL=ws://stt:8080
+      - KYUTAI_TTS_URL=ws://tts:8081
+      - KYUTAI_LLM_URL=https://api.scaleway.ai/v1
+      - KYUTAI_LLM_MODEL=gemma-3-27b-it
+      - KYUTAI_LLM_API_KEY=${SCALEWAY_API_KEY}
+
+  frontend:
+    build:
+      context: pkg/frontend
+      dockerfile: Dockerfile
+    image: kyutai/unmute-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    ports:
+      - "80:8000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=ws://localhost/v1/realtime

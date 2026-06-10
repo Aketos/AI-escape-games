@@ -1,0 +1,64 @@
+{
+  "tools": [
+    {
+      "name": "inspect_item",
+      "description": "Utilise cette fonction quand le joueur veut examiner, regarder, ou fouiller un objet spécifique de la pièce.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_item": {
+            "type": "string",
+            "description": "L'ID exact de l'objet dans la pièce (ex: 'blouse_scientifique', 'mur_metallique')."
+          }
+        },
+        "required": ["target_item"]
+      }
+    },
+    {
+      "name": "take_item",
+      "description": "Utilise cette fonction quand le joueur dit explicitement qu'il veut prendre, ramasser ou garder un objet.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_item": {
+            "type": "string",
+            "description": "L'ID de l'objet à prendre (ex: 'fiole_uv')."
+          }
+        },
+        "required": ["target_item"]
+      }
+    },
+    {
+      "name": "use_item",
+      "description": "Utilise cette fonction quand le joueur veut utiliser un objet de son inventaire SUR un objet de la pièce.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "inventory_item": {
+            "type": "string",
+            "description": "L'ID de l'objet tenu par le joueur (ex: 'fiole_uv')."
+          },
+          "target_item": {
+            "type": "string",
+            "description": "L'ID de l'objet cible dans la pièce (ex: 'mur_metallique')."
+          }
+        },
+        "required": ["inventory_item", "target_item"]
+      }
+    },
+    {
+      "name": "input_pin_code",
+      "description": "Utilise cette fonction UNIQUEMENT quand l'encodeur de cartes attend un code et que le joueur prononce des chiffres.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pin_code": {
+            "type": "string",
+            "description": "Le code à 4 chiffres dit par le joueur."
+          }
+        },
+        "required": ["pin_code"]
+      }
+    }
+  ]
+}
