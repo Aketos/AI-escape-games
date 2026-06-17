@@ -92,6 +92,9 @@ func (s *WSServer) HandleConnections(w http.ResponseWriter, r *http.Request) {
 		unmuteURL = "ws://localhost:8000/v1/realtime" // Unmute dev default
 	}
 	unmuteVoice := os.Getenv("UNMUTE_VOICE") // optional TTS voice path
+	if unmuteVoice == "" {
+		unmuteVoice = "cml-tts/fr/12080_11650_000047-0001_enhanced.wav" // default French voice
+	}
 
 	conn.WriteJSON(ServerMessage{Type: "status", Payload: "AI Engine Ready"})
 

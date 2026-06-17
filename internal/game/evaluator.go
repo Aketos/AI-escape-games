@@ -3,22 +3,248 @@ package game
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 // GameEngine encapsulates the GameState and a mutex for thread-safe operations.
 type GameEngine struct {
-	mu    sync.Mutex
-	State *GameState
+	mu        sync.Mutex
+	State     *GameState
+	startedAt time.Time
+	oxygen    time.Duration
 }
 
-// NewGameEngine creates a new GameEngine instance.
+// NewGameEngine creates a new GameEngine instance. The oxygen countdown
+// starts immediately: the scenario gives the player 45 minutes.
 func NewGameEngine(state *GameState) *GameEngine {
 	return &GameEngine{
-		State: state,
+		State:     state,
+		startedAt: time.Now(),
+		oxygen:    45 * time.Minute,
 	}
 }
+
+// Lock locks the game engine for safe concurrent access.
+func (e *GameEngine) Lock() {
+	e.mu.Lock()
+}
+
+// Unlock unlocks the game engine.
+func (e *GameEngine) Unlock() {
+	e.mu.Unlock()
+}
+
+// OxygenRemaining returns how much oxygen time is left (never negative).
+func (e *GameEngine) OxygenRemaining() time.Duration {
+	remaining := e.oxygen - time.Since(e.startedAt)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// IsWon reports whether the victory condition has been reached.
+func (e *GameEngine) IsWon() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.State.Won
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy matching
+//
+// Voice transcription mangles IDs: the player says "la fiole", the LLM
+// dictates "Requête prendre fiole uv", the parser squashes it to
+// "fioleuv". All resolution is therefore done on normalized keys shared
+// between the engine and the voice parser.
+// ---------------------------------------------------------------------------
+
+var accentReplacer = strings.NewReplacer(
+	"à", "a", "â", "a", "ä", "a",
+	"é", "e", "è", "e", "ê", "e", "ë", "e",
+	"î", "i", "ï", "i",
+	"ô", "o", "ö", "o",
+	"ù", "u", "û", "u", "ü", "u",
+	"ç", "c", "œ", "oe",
+)
+
+// NormalizeKey lowercases, strips accents and removes everything that is not
+// a letter or a digit, so "Requête Fiole UV" becomes "requetefioleuv".
+func NormalizeKey(s string) string {
+	s = accentReplacer.Replace(strings.ToLower(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// minFuzzyLen avoids absurd substring matches ("le" matching half the room).
+const minFuzzyLen = 4
+
+var stopWords = map[string]bool{
+	"les": true, "des": true, "une": true, "aux": true, "sur": true,
+	"par": true, "pres": true, "dans": true, "avec": true, "vers": true,
+}
+
+// significantWords splits an id or display name into normalized words worth
+// matching individually ("Le bureau au fond" -> ["bureau", "fond"]).
+func significantWords(s string) []string {
+	s = accentReplacer.Replace(strings.ToLower(s))
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+	})
+	var out []string
+	for _, w := range fields {
+		if len(w) >= 3 && !stopWords[w] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// itemMatchScore rates how well a normalized key designates an item.
+// 0 means no match; exact matches dominate everything else.
+func itemMatchScore(key, id, name string) int {
+	normID, normName := NormalizeKey(id), NormalizeKey(name)
+	if key == normID || (normName != "" && key == normName) {
+		return 1 << 20
+	}
+	score := 0
+	if len(normID) >= minFuzzyLen && strings.Contains(key, normID) {
+		score += len(normID) * 4
+	} else if len(key) >= minFuzzyLen && strings.Contains(normID, key) {
+		score += len(key) * 2
+	}
+	if normName != "" {
+		if len(normName) >= minFuzzyLen && strings.Contains(key, normName) {
+			score += len(normName) * 4
+		} else if len(key) >= minFuzzyLen && strings.Contains(normName, key) {
+			score += len(key) * 2
+		}
+	}
+	for _, w := range significantWords(id) {
+		if strings.Contains(key, w) {
+			score += len(w)
+		}
+	}
+	for _, w := range significantWords(name) {
+		if strings.Contains(key, w) {
+			score += len(w)
+		}
+	}
+	return score
+}
+
+// resolveRoomItem finds the visible room item best matching a raw reference
+// (exact ID, squashed transcription, display name or a significant word of
+// it). Must be called with the engine lock held.
+func resolveRoomItem(room *RoomState, raw string) (string, *RoomItem) {
+	if item, ok := room.Items[raw]; ok && item.Visible {
+		return raw, item
+	}
+	key := NormalizeKey(raw)
+	if key == "" {
+		return "", nil
+	}
+	bestScore := 0
+	var bestID string
+	var best *RoomItem
+	for id, item := range room.Items {
+		if !item.Visible {
+			continue
+		}
+		if s := itemMatchScore(key, id, item.Name); s > bestScore {
+			bestScore, bestID, best = s, id, item
+		}
+	}
+	return bestID, best
+}
+
+// resolveInventoryItem finds the inventory item best matching a raw
+// reference. Must be called with the engine lock held.
+func (e *GameEngine) resolveInventoryItem(raw string) string {
+	key := NormalizeKey(raw)
+	if key == "" {
+		return ""
+	}
+	bestScore := 0
+	bestID := ""
+	for _, inv := range e.State.Player.Inventory {
+		if inv.ID == raw {
+			return inv.ID
+		}
+		if s := itemMatchScore(key, inv.ID, inv.Name); s > bestScore {
+			bestScore, bestID = s, inv.ID
+		}
+	}
+	return bestID
+}
+
+// ItemKey exposes the normalized identifiers of a visible item so the voice
+// parser can confirm a match without touching engine internals.
+type ItemKey struct {
+	ID       string
+	NormID   string
+	NormName string
+}
+
+// VisibleItemKeys returns the normalized keys of every visible item in the
+// player's current room (thread-safe snapshot).
+func (e *GameEngine) VisibleItemKeys() []ItemKey {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	room, ok := e.State.Rooms[e.State.Player.CurrentRoom]
+	if !ok {
+		return nil
+	}
+	keys := make([]ItemKey, 0, len(room.Items))
+	for id, item := range room.Items {
+		if !item.Visible {
+			continue
+		}
+		keys = append(keys, ItemKey{
+			ID:       id,
+			NormID:   NormalizeKey(id),
+			NormName: NormalizeKey(item.Name),
+		})
+	}
+	return keys
+}
+
+// revealContents makes every item nested in container visible in the room.
+// Returns true if at least one new item was revealed.
+func revealContents(room *RoomState, container *RoomItem) bool {
+	revealed := false
+	for _, nestedID := range container.Contains {
+		if nested, ok := room.Items[nestedID]; ok && !nested.Visible {
+			nested.Visible = true
+			revealed = true
+		}
+	}
+	return revealed
+}
+
+// removeFromInventory drops an item from the player's inventory.
+func (e *GameEngine) removeFromInventory(itemID string) {
+	inv := e.State.Player.Inventory
+	for i, item := range inv {
+		if item.ID == itemID {
+			e.State.Player.Inventory = append(inv[:i], inv[i+1:]...)
+			return
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Action handlers
+// ---------------------------------------------------------------------------
 
 // HandleInspectItem processes an inspect action.
 func (e *GameEngine) HandleInspectItem(playerID, itemID string) (response string, sfx string, err error) {
@@ -31,8 +257,8 @@ func (e *GameEngine) HandleInspectItem(playerID, itemID string) (response string
 		return "", "", fmt.Errorf("room %s not found", roomID)
 	}
 
-	item, ok := room.Items[itemID]
-	if !ok || !item.Visible {
+	_, item := resolveRoomItem(room, itemID)
+	if item == nil {
 		return "Cet objet n'est pas ici ou n'est pas visible.", "", nil
 	}
 
@@ -42,19 +268,11 @@ func (e *GameEngine) HandleInspectItem(playerID, itemID string) (response string
 		response = fmt.Sprintf("Vous inspectez %s. Il n'y a rien de particulier.", item.Name)
 	}
 
-	// Make nested items visible
-	if len(item.Contains) > 0 {
+	if revealContents(room, item) {
 		sfx = "sfx_item_discovered"
 	}
-	for _, nestedID := range item.Contains {
-		if nestedItem, ok := room.Items[nestedID]; ok {
-			nestedItem.Visible = true
-		}
-	}
 
-	// Append to history
-	actionDesc := fmt.Sprintf("A inspecté : %s", item.Name)
-	e.State.Player.History = append(e.State.Player.History, actionDesc)
+	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A inspecté : %s", item.Name))
 
 	return response, sfx, nil
 }
@@ -70,28 +288,26 @@ func (e *GameEngine) HandleTakeItem(playerID, itemID string) (response string, s
 		return "", "", fmt.Errorf("room %s not found", roomID)
 	}
 
-	item, ok := room.Items[itemID]
-	if !ok || !item.Visible {
+	resolvedID, item := resolveRoomItem(room, itemID)
+	if item == nil {
 		return "Cet objet n'est pas ici ou n'est pas visible.", "", nil
 	}
 
 	if !item.IsCollectible {
-		return "Vous ne pouvez pas ramasser cela.", "", nil
+		return fmt.Sprintf("%s ne peut pas être emporté.", item.Name), "", nil
 	}
 
-	// Add to inventory
+	// Anything hidden inside must not vanish with the container.
+	revealContents(room, item)
+
 	e.State.Player.Inventory = append(e.State.Player.Inventory, InventoryItem{
-		ID:    itemID,
+		ID:    resolvedID,
 		Name:  item.Name,
 		State: item.State,
 	})
+	delete(room.Items, resolvedID)
 
-	// Remove from room or mark as collected (here we remove it for simplicity)
-	delete(room.Items, itemID)
-
-	// Append to history
-	actionDesc := fmt.Sprintf("A ramassé : %s", item.Name)
-	e.State.Player.History = append(e.State.Player.History, actionDesc)
+	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A ramassé : %s", item.Name))
 
 	return fmt.Sprintf("Vous avez pris %s.", item.Name), "sfx_item_pickup", nil
 }
@@ -101,16 +317,8 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Verify player has the item in inventory
-	hasItem := false
-	for _, invItem := range e.State.Player.Inventory {
-		if invItem.ID == inventoryItemID {
-			hasItem = true
-			break
-		}
-	}
-
-	if !hasItem {
+	invID := e.resolveInventoryItem(inventoryItemID)
+	if invID == "" {
 		return "Vous n'avez pas cet objet dans votre inventaire.", "", nil
 	}
 
@@ -120,29 +328,47 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 		return "", "", fmt.Errorf("room %s not found", roomID)
 	}
 
-	targetItem, ok := room.Items[targetItemID]
-	if !ok || !targetItem.Visible {
+	resolvedTargetID, targetItem := resolveRoomItem(room, targetItemID)
+	if targetItem == nil {
 		return "La cible n'est pas ici ou n'est pas visible.", "", nil
 	}
 
-	// Verify requires logic
-	if targetItem.Requires != inventoryItemID {
+	if targetItem.SuccessState != "" && targetItem.State == targetItem.SuccessState {
+		return fmt.Sprintf("C'est déjà fait : %s a déjà été activé.", targetItem.Name), "", nil
+	}
+
+	if targetItem.Requires == "" || targetItem.Requires != invID {
 		if targetItem.FailMessage != "" {
 			return targetItem.FailMessage, "", nil
 		}
 		return "Cela ne fonctionne pas.", "", nil
 	}
 
-	// Valid target requirement met, update target state (e.g. locked -> unlocked)
-	if targetItem.State == "locked" {
+	// Requirement met: apply the state transition.
+	switch {
+	case targetItem.SuccessState != "":
+		targetItem.State = targetItem.SuccessState
+	case targetItem.State == "locked":
 		targetItem.State = "unlocked"
-	} else if targetItem.State == "waiting_card" {
+	case targetItem.State == "waiting_card":
 		targetItem.State = "waiting_pin"
 	}
 
-	// Append to history
-	actionDesc := fmt.Sprintf("A utilisé %s sur %s", inventoryItemID, targetItem.Name)
-	e.State.Player.History = append(e.State.Player.History, actionDesc)
+	// Reveal anything the action uncovers (e.g. a key freed from the ice).
+	revealContents(room, targetItem)
+
+	// Consume the inventory item if the target uses it up (e.g. blank card
+	// swallowed by the encoder).
+	if targetItem.ConsumesItem {
+		e.removeFromInventory(invID)
+	}
+
+	if targetItem.WinsGame {
+		e.State.Won = true
+		e.State.Player.History = append(e.State.Player.History, "A déverrouillé la porte principale : MISSION ACCOMPLIE.")
+	}
+
+	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A utilisé %s sur %s (%s)", invID, targetItem.Name, resolvedTargetID))
 
 	if targetItem.SuccessMessage != "" {
 		return targetItem.SuccessMessage, targetItem.SuccessSFX, nil
@@ -150,7 +376,8 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 	return "Cela a fonctionné.", targetItem.SuccessSFX, nil
 }
 
-// HandleInputPinCode processes an input_pin_code action.
+// HandleInputPinCode processes an input_pin_code action. The device is found
+// dynamically: any visible item in the room currently waiting for a PIN.
 func (e *GameEngine) HandleInputPinCode(playerID string, pinCode string) (response string, sfx string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -161,40 +388,140 @@ func (e *GameEngine) HandleInputPinCode(playerID string, pinCode string) (respon
 		return "", "", fmt.Errorf("room %s not found", roomID)
 	}
 
-	encodeur, ok := room.Items["encodeur_magnetique"]
-	if !ok || !encodeur.Visible {
-		return "L'encodeur n'est pas ici ou n'est pas visible.", "", nil
-	}
-
-	if encodeur.State != "waiting_pin" {
-		return "L'encodeur n'attend pas de code PIN pour le moment. Insérez d'abord une carte vierge.", "", nil
-	}
-
-	if pinCode == "8421" {
-		encodeur.State = "encoded"
-
-		carteEncodee, ok := room.Items["carte_encodee"]
-		if ok {
-			e.State.Player.Inventory = append(e.State.Player.Inventory, InventoryItem{
-				ID:    "carte_encodee",
-				Name:  carteEncodee.Name,
-				State: carteEncodee.State,
-			})
-			delete(room.Items, "carte_encodee")
-		} else {
-			e.State.Player.Inventory = append(e.State.Player.Inventory, InventoryItem{
-				ID:   "carte_encodee",
-				Name: "Carte d'accès niveau 1",
-			})
+	var device *RoomItem
+	for _, item := range room.Items {
+		if item.Visible && item.State == "waiting_pin" && item.PinCode != "" {
+			device = item
+			break
 		}
-
-		e.State.Player.History = append(e.State.Player.History, "A entré le bon code PIN (8421) sur l'encodeur.")
-
-		return "Code accepté. L'encodeur recrache une carte d'accès de niveau 1 encodée.", "sfx_access_granted", nil
+	}
+	if device == nil {
+		return "Aucun appareil n'attend de code PIN pour le moment.", "", nil
 	}
 
-	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A entré un mauvais code PIN (%s) sur l'encodeur.", pinCode))
-	return "Code PIN incorrect.", "sfx_error_buzzer", nil
+	// Keep only digits: the transcription may yield "8-4-2-1" or "8 4 2 1".
+	var digits strings.Builder
+	for _, r := range pinCode {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+	entered := digits.String()
+
+	if entered != device.PinCode {
+		e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A entré un mauvais code PIN (%s) sur %s.", entered, device.Name))
+		return "Code PIN incorrect.", "sfx_error_buzzer", nil
+	}
+
+	if device.PinSuccessState != "" {
+		device.State = device.PinSuccessState
+	} else {
+		device.State = "unlocked"
+	}
+
+	// Hand over whatever the device produces (e.g. the encoded card).
+	var producedNames []string
+	for _, producedID := range device.Produces {
+		name := producedID
+		state := ""
+		if produced, ok := room.Items[producedID]; ok {
+			name = produced.Name
+			state = produced.State
+			delete(room.Items, producedID)
+		}
+		e.State.Player.Inventory = append(e.State.Player.Inventory, InventoryItem{
+			ID:    producedID,
+			Name:  name,
+			State: state,
+		})
+		producedNames = append(producedNames, name)
+	}
+
+	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A entré le bon code PIN sur %s.", device.Name))
+
+	response = device.PinSuccessMessage
+	if response == "" {
+		response = "Code accepté."
+		if len(producedNames) > 0 {
+			response += " Vous obtenez : " + strings.Join(producedNames, ", ") + "."
+		}
+	}
+	return response, "sfx_access_granted", nil
+}
+
+// ---------------------------------------------------------------------------
+// LLM context
+// ---------------------------------------------------------------------------
+
+// GetContextString returns a formatted string of the current game state
+// directly tailored for the LLM's system prompt.
+func (engine *GameEngine) GetContextString() string {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+
+	var sb strings.Builder
+
+	// 1. INVENTAIRE ET SALLE ACTUELLE
+	sb.WriteString("=== ÉTAT DU JOUEUR ===\n")
+	sb.WriteString(fmt.Sprintf("- Salle actuelle : %s\n", engine.State.Player.CurrentRoom))
+	sb.WriteString(fmt.Sprintf("- Oxygène restant : environ %d minutes. Rappelle-le au joueur quand c'est pertinent, avec une urgence croissante.\n", int(engine.OxygenRemaining().Minutes())))
+
+	if engine.State.Won {
+		sb.WriteString("- !!! LA PORTE PRINCIPALE EST DÉVERROUILLÉE : LA MISSION EST ACCOMPLIE. Félicite le joueur à ta manière (sarcastique) et conclus la partie. !!!\n")
+	}
+
+	if len(engine.State.Player.Inventory) > 0 {
+		var invNames []string
+		for _, item := range engine.State.Player.Inventory {
+			invNames = append(invNames, fmt.Sprintf("%s (commande : '%s')", item.Name, strings.ReplaceAll(item.ID, "_", " ")))
+		}
+		sb.WriteString("- Inventaire : " + strings.Join(invNames, ", ") + "\n")
+	} else {
+		sb.WriteString("- Inventaire : Vide\n")
+	}
+
+	// 2. ÉLÉMENTS DU JEU (ZONES ET OBJETS)
+	sb.WriteString("\n=== ÉLÉMENTS VISIBLES DANS LA PIÈCE ===\n")
+	sb.WriteString("RÈGLE ABSOLUE : Tu ne peux interagir qu'avec les éléments listés ci-dessous.\n")
+	sb.WriteString("Cependant, fais preuve d'intelligence contextuelle : si le joueur nomme un objet qui fait partie du décor d'une zone (comme un 'caisson' ou une 'grille'), déclenche l'inspection de la zone associée sans le corriger.\n")
+
+	roomID := engine.State.Player.CurrentRoom
+	room, ok := engine.State.Rooms[roomID]
+	visibleCount := 0
+
+	if ok {
+		for id, item := range room.Items {
+			if !item.Visible {
+				continue
+			}
+			visibleCount++
+			spoken := strings.ReplaceAll(id, "_", " ")
+
+			switch item.Type {
+			case "zone":
+				sb.WriteString(fmt.Sprintf("- ZONE VISIBLE | Nom : '%s' | Commande vocale : '%s'\n", item.Name, spoken))
+			default:
+				sb.WriteString(fmt.Sprintf("- OBJET VISIBLE | Nom : '%s' | Commande vocale : '%s'\n", item.Name, spoken))
+			}
+
+			if item.State != "" {
+				sb.WriteString(fmt.Sprintf("  État : %s\n", item.State))
+			}
+			if item.Inspected {
+				sb.WriteString("  [Déjà inspecté]\n")
+			}
+			if item.DescriptionOnInspect != "" && item.Inspected {
+				sb.WriteString(fmt.Sprintf("  Description : %s\n", item.DescriptionOnInspect))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	if visibleCount == 0 {
+		sb.WriteString("- (Aucun élément visible pour le moment)\n")
+	}
+
+	return sb.String()
 }
 
 // StateSnapshot returns a French textual summary of the current game state,
@@ -205,6 +532,11 @@ func (e *GameEngine) StateSnapshot() string {
 	defer e.mu.Unlock()
 
 	var b strings.Builder
+
+	fmt.Fprintf(&b, "Oxygène restant : environ %d minutes.\n", int(e.OxygenRemaining().Minutes()))
+	if e.State.Won {
+		b.WriteString("LA PORTE PRINCIPALE EST DÉVERROUILLÉE : MISSION ACCOMPLIE. Conclus la partie.\n")
+	}
 
 	room, ok := e.State.Rooms[e.State.Player.CurrentRoom]
 	if ok {
@@ -255,6 +587,7 @@ func (e *GameEngine) ProcessLLMFunctionCall(call FunctionCall) (string, string) 
 	var response string
 	var sfx string
 	var err error
+	log.Printf("DEBUG: LLM function call: %s", call.Name)
 
 	switch call.Name {
 	case "inspect_item":

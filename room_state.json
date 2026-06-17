@@ -9,7 +9,8 @@
       "description_on_inspect": "Le sol métallique est couvert de givre. En y regardant de plus près, vous remarquez une masse sombre recroquevillée près d'une grille d'aération : c'est une blouse de scientifique abandonnée.",
       "contains": [
         "blouse_scientifique"
-      ]
+      ],
+      "type": "zone"
     },
     "zone_bureau": {
       "name": "Le bureau au fond",
@@ -20,7 +21,8 @@
         "encodeur_magnetique",
         "terminal_securite",
         "moniteur_brise"
-      ]
+      ],
+      "type": "zone"
     },
     "zone_mur_gauche": {
       "name": "Le grand mur gauche",
@@ -30,7 +32,8 @@
       "contains": [
         "mur_metallique",
         "tuyaux_refroidissement"
-      ]
+      ],
+      "type": "zone"
     },
     "zone_plafond": {
       "name": "Le plafond et les conduits",
@@ -39,27 +42,32 @@
       "description_on_inspect": "En levant les yeux, vous voyez le système de ventilation qui tourne au ralenti. L'un des panneaux d'accès du plafond est entrouvert, laissant pendre un bout de sangle d'escalade.",
       "contains": [
         "sangle_escalade"
-      ]
+      ],
+      "type": "zone"
     },
     "blouse_scientifique": {
       "name": "Blouse de scientifique déchirée",
-      "visible": false,
+      "visible": true,
       "inspected": false,
       "description_on_inspect": "La blouse est tachée de sang séché. Dans la poche, il y a une fiole en verre et une carte vierge.",
       "contains": [
         "fiole_uv",
         "carte_vierge"
-      ]
+      ],
+      "type": "item"
     },
     "mur_metallique": {
       "name": "La plaque métallique nue",
-      "visible": false,
+      "visible": true,
       "is_collectible": false,
       "state": "dirty",
       "requires": "fiole_uv",
+      "description_on_inspect": "Une simple plaque de métal brossé. Elle semble avoir été essuyée récemment en son centre, comme pour effacer quelque chose.",
       "success_message": "Le liquide réagit immédiatement. Des chiffres fluorescents apparaissent : 8-4-2-1.",
       "fail_message": "Une simple plaque de métal brossé. Elle semble avoir été essuyée récemment en son centre.",
-      "SuccessSFX": "sfx_liquid_splash"
+      "success_state": "revealed",
+      "success_sfx": "sfx_liquid_splash",
+      "type": "item"
     },
     "encodeur_magnetique": {
       "name": "Encodeur de cartes",
@@ -67,9 +75,18 @@
       "is_collectible": false,
       "state": "waiting_card",
       "requires": "carte_vierge",
+      "consumes_item": true,
       "success_message": "L'encodeur avale la carte vierge avec un petit clic. Son écran s'allume et affiche : 'ENTREZ LE CODE PIN A 4 CHIFFRES POUR ENCODAGE'.",
       "fail_message": "L'appareil clignote en rouge. Il a besoin d'un support vierge pour fonctionner.",
-      "SuccessSFX": "sfx_machine_whir"
+      "success_state": "waiting_pin",
+      "success_sfx": "sfx_machine_whir",
+      "pin_code": "8421",
+      "pin_success_state": "encoded",
+      "pin_success_message": "Code accepté. L'encodeur recrache une carte d'accès de niveau 1 encodée.",
+      "produces": [
+        "carte_encodee"
+      ],
+      "type": "item"
     },
     "terminal_securite": {
       "name": "Terminal de sécurité",
@@ -79,38 +96,46 @@
       "requires": "carte_encodee",
       "success_message": "Le lecteur passe au vert. Un lourd mécanisme se déclenche dans la pièce. La porte principale se déverrouille.",
       "fail_message": "Le terminal indique 'ACCÈS REFUSÉ'. Il faut scanner une carte d'accès valide de niveau 1.",
-      "SuccessSFX": "sfx_door_heavy_unlock"
+      "success_state": "unlocked",
+      "success_sfx": "sfx_door_heavy_unlock",
+      "wins_game": true,
+      "type": "item"
     },
     "fiole_uv": {
       "name": "Fiole de luminol",
       "visible": false,
       "is_collectible": true,
-      "description_on_inspect": "L'étiquette indique : 'Réactif au luminol. Révèle instantanément les encres polymères sur les surfaces lisses'."
+      "description_on_inspect": "L'étiquette indique : 'Réactif au luminol. Révèle instantanément les encres polymères sur les surfaces lisses'.",
+      "type": "item"
     },
     "carte_vierge": {
       "name": "Carte magnétique vierge",
       "visible": false,
       "is_collectible": true,
-      "description_on_inspect": "Une simple carte d'accès blanche sans aucune donnée."
+      "description_on_inspect": "Une simple carte d'accès blanche sans aucune donnée.",
+      "type": "item"
     },
     "carte_encodee": {
       "name": "Carte d'accès niveau 1",
       "visible": false,
       "is_collectible": true,
-      "description_on_inspect": "La carte a été encodée avec l'autorisation de niveau 1."
+      "description_on_inspect": "La carte a été encodée avec l'autorisation de niveau 1.",
+      "type": "item"
     },
     "sangle_escalade": {
       "name": "Sangle d'escalade en kevlar",
       "visible": false,
       "is_collectible": true,
-      "description_on_inspect": "Une sangle tactique ultra-résistante avec un mousqueton en acier trempé."
+      "description_on_inspect": "Une sangle tactique ultra-résistante avec un mousqueton en acier trempé.",
+      "type": "item"
     },
     "moniteur_brise": {
       "name": "Moniteur brisé",
       "visible": false,
       "is_collectible": false,
       "inspected": false,
-      "description_on_inspect": "L'écran cathodique est complètement explosé. En fouillant les débris de verre, vous ne trouvez rien d'autre qu'un vieux post-it disant 'Acheter du lait'. Inutile."
+      "description_on_inspect": "L'écran cathodique est complètement explosé. En fouillant les débris de verre, vous ne trouvez rien d'autre qu'un vieux post-it disant 'Acheter du lait'. Inutile.",
+      "type": "item"
     },
     "tuyaux_refroidissement": {
       "name": "Tuyaux de refroidissement",
@@ -125,13 +150,16 @@
       "contains": [
         "cle_securite_rouge"
       ],
-      "SuccessSFX": "sfx_ice_melting"
+      "success_state": "melted",
+      "success_sfx": "sfx_ice_melting",
+      "type": "item"
     },
     "cle_securite_rouge": {
       "name": "Clé de sécurité rouge",
       "visible": false,
       "is_collectible": true,
-      "description_on_inspect": "Une petite clé en métal avec un embout rouge vif. Elle semble appartenir à un panneau de commande."
+      "description_on_inspect": "Une petite clé en métal avec un embout rouge vif. Elle semble appartenir à un panneau de commande.",
+      "type": "item"
     }
   }
 }

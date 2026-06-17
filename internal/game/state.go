@@ -52,6 +52,14 @@ type RoomItem struct {
 	SuccessMessage       string   `json:"success_message,omitempty"`
 	FailMessage          string   `json:"fail_message,omitempty"`
 	SuccessSFX           string   `json:"success_sfx,omitempty"`
+	SuccessState         string   `json:"success_state,omitempty"`
+	ConsumesItem         bool     `json:"consumes_item,omitempty"`
+	PinCode              string   `json:"pin_code,omitempty"`
+	PinSuccessState      string   `json:"pin_success_state,omitempty"`
+	PinSuccessMessage    string   `json:"pin_success_message,omitempty"`
+	Produces             []string `json:"produces,omitempty"`
+	WinsGame             bool     `json:"wins_game,omitempty"`
+	Type                 string   `json:"type"`
 }
 
 // RoomState defines a physical location in the game and its interactive state.
@@ -67,6 +75,7 @@ type RoomState struct {
 type GameState struct {
 	Player PlayerState
 	Rooms  map[string]*RoomState
+	Won    bool
 }
 
 // NewGameState initializes a blank game state.

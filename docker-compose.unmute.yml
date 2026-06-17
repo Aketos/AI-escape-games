@@ -48,7 +48,5 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    ports:
-      - "80:8000"
     environment:
       - NEXT_PUBLIC_BACKEND_URL=ws://localhost/v1/realtime
