@@ -26,4 +26,10 @@ server {
         proxy_buffering off;
         proxy_read_timeout 86400; # Keep WS connection open for 24 hours
     }
+
+    # Proxy API requests to the backend
+    location /game-state {
+        proxy_pass ${BACKEND_URL}/game-state;
+        proxy_ssl_server_name on;
+    }
 }

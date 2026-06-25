@@ -12,6 +12,7 @@ interface UseAudioStreamReturn {
   micVolume: number;
   aiVolume: number;
   logs: string[];
+  onGameState: (cb: (data: unknown) => void) => void;
 }
 
 export function useAudioStream(url: string): UseAudioStreamReturn {
@@ -21,6 +22,8 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
   const [aiVolume, setAiVolume] = useState(0);
 
   const [isAISpeaking, setIsAISpeaking] = useState(false);
+
+  const gameStateCallbackRef = useRef<((data: unknown) => void) | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -121,6 +124,10 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
             }, 500);
 
             playAudioChunk(data.payload, audioCtx);
+          } else if (data.type === 'game_state') {
+            if (gameStateCallbackRef.current) {
+              gameStateCallbackRef.current(data.payload);
+            }
           }
         } catch (e) {
           console.error("Failed to parse message", e);
@@ -274,5 +281,9 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
     return () => cleanup();
   }, []);
 
-  return { status, connect, disconnect, micVolume, aiVolume, logs };
+  const onGameState = useCallback((cb: (data: unknown) => void) => {
+    gameStateCallbackRef.current = cb;
+  }, []);
+
+  return { status, connect, disconnect, micVolume, aiVolume, logs, onGameState };
 }

@@ -20,25 +20,46 @@ func sseChunk(content string) string {
 	return "data: " + string(b) + "\n\n"
 }
 
-// TestProxyStripsActionTagsAndContinues covers the core gameplay loop:
-// the [ACTION: ...] tag must never reach the TTS stream, the game engine
-// must execute it, and the LLM must be re-queried to narrate the result.
-func TestProxyStripsActionTagsAndContinues(t *testing.T) {
+// sseToolCallChunk builds a streaming chunk carrying a tool_calls delta.
+func sseToolCallChunk(index int, id, name, args string) string {
+	b, _ := json.Marshal(map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{
+				"index": 0,
+				"delta": map[string]interface{}{
+					"tool_calls": []map[string]interface{}{
+						{
+							"index":    index,
+							"id":       id,
+							"type":     "function",
+							"function": map[string]string{"name": name, "arguments": args},
+						},
+					},
+				},
+			},
+		},
+	})
+	return "data: " + string(b) + "\n\n"
+}
+
+// TestProxyToolCallAndContinue covers the core gameplay loop with native
+// tool calling: the LLM emits a tool_call, the game engine executes it, and
+// the LLM is re-queried to narrate the result. The tool call itself must
+// never appear in the TTS stream.
+func TestProxyToolCallAndContinue(t *testing.T) {
 	calls := 0
 	var secondCallMessages string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "text/event-stream")
 		if calls == 1 {
-			// Tag deliberately split across deltas to test the streaming filter.
+			// Narration text, then a tool call.
 			fmt.Fprint(w, sseChunk("Voyons cette blouse. "))
-			fmt.Fprint(w, sseChunk("[ACT"))
-			fmt.Fprint(w, sseChunk("ION: inspect_item(blouse"))
-			fmt.Fprint(w, sseChunk("_scientifique)]"))
+			fmt.Fprint(w, sseToolCallChunk(0, "call_123", "inspect_item", `{"target_item":"blouse_scientifique"}`))
 			fmt.Fprint(w, "data: [DONE]\n\n")
 		} else {
 			var req struct {
-				Messages []chatMessage `json:"messages"`
+				Messages []ChatMessage `json:"messages"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			b, _ := json.Marshal(req.Messages)
@@ -84,11 +105,11 @@ func TestProxyStripsActionTagsAndContinues(t *testing.T) {
 
 	out := rec.Body.String()
 
-	if strings.Contains(out, "ACTION") {
-		t.Errorf("action tag leaked into the TTS stream:\n%s", out)
+	if strings.Contains(out, "inspect_item") {
+		t.Errorf("tool call name leaked into the TTS stream:\n%s", out)
 	}
 	if !strings.Contains(out, "Voyons cette blouse.") {
-		t.Errorf("text before the tag missing from stream:\n%s", out)
+		t.Errorf("narration text before tool call missing from stream:\n%s", out)
 	}
 	if !strings.Contains(out, "Une poche contient quelque chose.") {
 		t.Errorf("continuation narration missing from stream:\n%s", out)
@@ -105,6 +126,10 @@ func TestProxyStripsActionTagsAndContinues(t *testing.T) {
 	}
 	if !strings.Contains(secondCallMessages, "carte magnétique dépasse") {
 		t.Errorf("action result not fed back to the LLM:\n%s", secondCallMessages)
+	}
+	// Verify the tool role message was sent in the second call.
+	if !strings.Contains(secondCallMessages, `"role":"tool"`) {
+		t.Errorf("tool role message missing from second call:\n%s", secondCallMessages)
 	}
 }
 
@@ -173,7 +198,7 @@ func TestRewriteMessagesFirstTurn(t *testing.T) {
 	}
 	p := &LLMProxy{Engine: game.NewGameEngine(state), Model: "m"}
 
-	first := p.rewriteMessages([]chatMessage{
+	first := p.rewriteMessages([]ChatMessage{
 		{Role: "system", Content: "unmute template"},
 		{Role: "user", Content: "bonjour"},
 	})
@@ -190,7 +215,7 @@ func TestRewriteMessagesFirstTurn(t *testing.T) {
 		t.Error("unmute's own system prompt should be discarded")
 	}
 
-	later := p.rewriteMessages([]chatMessage{
+	later := p.rewriteMessages([]ChatMessage{
 		{Role: "system", Content: "unmute template"},
 		{Role: "user", Content: "bonjour"},
 		{Role: "assistant", Content: "Alerte critique."},

@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "inspect_item",
-      "description": "Utilise cette fonction quand le joueur veut examiner, regarder, ou fouiller un objet spécifique de la pièce.",
+      "description": "OBLIGATOIRE quand le joueur veut examiner, regarder, fouiller, inspecter ou décrire un objet spécifique de la pièce. Tu ne dois JAMAIS décrire toi-même un objet - appelle toujours cette fonction d'abord.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -16,7 +16,7 @@
     },
     {
       "name": "take_item",
-      "description": "Utilise cette fonction quand le joueur dit explicitement qu'il veut prendre, ramasser ou garder un objet.",
+      "description": "OBLIGATOIRE quand le joueur dit qu'il veut prendre, ramasser, récupérer ou garder un objet. Tu ne dois JAMAIS donner l'objet directement - appelle toujours cette fonction.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -30,7 +30,7 @@
     },
     {
       "name": "use_item",
-      "description": "Utilise cette fonction quand le joueur veut utiliser un objet de son inventaire SUR un objet de la pièce.",
+      "description": "OBLIGATOIRE quand le joueur veut utiliser, appliquer ou combiner un objet de son inventaire sur un objet de la pièce. Appelle toujours cette fonction au lieu de décrire le résultat.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -48,7 +48,7 @@
     },
     {
       "name": "input_pin_code",
-      "description": "Utilise cette fonction UNIQUEMENT quand l'encodeur de cartes attend un code et que le joueur prononce des chiffres.",
+      "description": "OBLIGATOIRE quand l'encodeur de cartes attend un code et que le joueur prononce des chiffres. Appelle cette fonction avec le code à 4 chiffres.",
       "parameters": {
         "type": "object",
         "properties": {

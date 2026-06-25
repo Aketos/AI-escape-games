@@ -1,11 +1,24 @@
+import { useEffect } from 'react';
 import { useAudioStream } from './hooks/useAudioStream';
+import { useGameState } from './hooks/useGameState';
 import { AudioVisualizer } from './components/AudioVisualizer';
+import { GamePanel, InventoryPanel } from './components/GamePanel';
 import { Mic, Terminal, Loader2 } from 'lucide-react';
 
 function App() {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}//${window.location.host}/ws`;
-  const { status, connect, disconnect, micVolume, aiVolume, logs } = useAudioStream(wsUrl);
+  const { status, connect, disconnect, micVolume, aiVolume, logs, onGameState } = useAudioStream(wsUrl);
+  const { state: gameState, clearState, handleGameStateMessage } = useGameState();
+
+  useEffect(() => {
+    onGameState(handleGameStateMessage);
+  }, [onGameState, handleGameStateMessage]);
+
+  const handleConnect = () => {
+    clearState();
+    connect();
+  };
 
   return (
     <div className="min-h-screen relative flex flex-col items-center justify-center">
@@ -17,6 +30,16 @@ function App() {
         STATUS: {status.toUpperCase()}
       </div>
 
+      {/* Rooms Panel - Left Side */}
+      <div className="absolute top-8 left-8 w-72 max-h-[calc(100vh-4rem)] overflow-y-auto bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm" style={{ marginTop: '3.5rem' }}>
+        <GamePanel state={gameState} />
+      </div>
+
+      {/* Inventory Panel - Right Side */}
+      <div className="absolute top-8 right-8 w-64 max-h-[calc(100vh-4rem)] overflow-y-auto bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm">
+        <InventoryPanel state={gameState} />
+      </div>
+
       {/* Main Visualizer */}
       <div className="z-20 mb-16">
         <AudioVisualizer micVolume={micVolume} aiVolume={aiVolume} />
@@ -26,7 +49,7 @@ function App() {
       <div className="z-20">
         {status === 'Idle' || status === 'Disconnected' ? (
           <button 
-            onClick={connect}
+            onClick={handleConnect}
             className="px-8 py-4 bg-transparent border-2 border-[#00ffcc] text-[#00ffcc] font-mono font-bold tracking-widest uppercase hover:bg-[#00ffcc] hover:text-[#0f0f11] transition-all duration-300 shadow-[0_0_15px_rgba(0,255,204,0.5)]"
           >
             Connect to Bunker
@@ -43,7 +66,7 @@ function App() {
           <button 
             onPointerDown={() => { /* Implement push-to-mute if needed */ }}
             onPointerUp={() => { /* Implement push-to-mute if needed */ }}
-            onClick={disconnect} // Using click to disconnect for now
+            onClick={disconnect}
             className="px-8 py-4 bg-transparent border-2 border-[#ff3333] text-[#ff3333] font-mono font-bold tracking-widest uppercase hover:bg-[#ff3333] hover:text-[#0f0f11] transition-all duration-300 shadow-[0_0_15px_rgba(255,51,51,0.5)] flex items-center gap-3"
           >
             <Mic className="w-5 h-5" />

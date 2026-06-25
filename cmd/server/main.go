@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 
 	"escape-game/internal/ai"
 	"escape-game/internal/game"
@@ -27,11 +29,25 @@ func main() {
 
 	// 4. OpenAI-compatible LLM proxy: Unmute's KYUTAI_LLM_URL must point at
 	// this server so game logic stays invisible to the TTS.
-	llmProxy := ai.NewLLMProxyFromEnv(engine, wsServer.BroadcastSFX)
+	llmProxy := ai.NewLLMProxyFromEnv(engine, wsServer.BroadcastSFX, wsServer.BroadcastGameState)
 
 	http.HandleFunc("/ws", wsServer.HandleConnections)
 	http.HandleFunc("/chat/completions", llmProxy.HandleChatCompletions)
+	http.HandleFunc("/v1/chat/completions", llmProxy.HandleChatCompletions)
 	http.HandleFunc("/models", llmProxy.HandleModels)
+	http.HandleFunc("/v1/models", llmProxy.HandleModels)
+	http.HandleFunc("/game-state", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(engine.GameStateForClient())
+	})
+	http.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, ferr := os.Stat("function_calls.json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"tools_loaded":        llmProxy.ToolsCount(),
+			"function_calls_json": ferr == nil,
+		})
+	})
 
 	port := ":8080"
 	log.Printf("Server listening on port %s", port)

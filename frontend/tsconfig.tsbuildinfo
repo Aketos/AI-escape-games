@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/AudioVisualizer.tsx","./src/hooks/useAudioStream.ts","./src/types/opus-recorder.d.ts"],"version":"5.6.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/AudioVisualizer.tsx","./src/components/GamePanel.tsx","./src/hooks/useAudioStream.ts","./src/hooks/useGameState.ts","./src/types/opus-recorder.d.ts"],"version":"5.6.3"}

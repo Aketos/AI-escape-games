@@ -647,3 +647,97 @@ func (e *GameEngine) ProcessLLMFunctionCall(call FunctionCall) (string, string) 
 
 	return string(resultBytes), sfx
 }
+
+// ClientRoom is a room as seen by the frontend.
+type ClientRoom struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Current     bool         `json:"current"`
+	Visited     bool         `json:"visited"`
+	Items       []ClientItem `json:"items"`
+}
+
+// ClientItem is an item as seen by the frontend.
+type ClientItem struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Type      string   `json:"type"`
+	Visible   bool     `json:"visible"`
+	Inspected bool     `json:"inspected"`
+	State     string   `json:"state,omitempty"`
+	Contains  []string `json:"contains,omitempty"`
+}
+
+// ClientInventoryItem is an inventory item as seen by the frontend.
+type ClientInventoryItem struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state,omitempty"`
+}
+
+// GameStateForClient returns a JSON-serializable snapshot of the game state
+// suitable for sending to the frontend.
+func (e *GameEngine) GameStateForClient() map[string]interface{} {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	rooms := make([]ClientRoom, 0, len(e.State.Rooms))
+	currentRoom := e.State.Player.CurrentRoom
+
+	for roomID, room := range e.State.Rooms {
+		visited := false
+		for _, h := range e.State.Player.History {
+			if strings.Contains(h, roomID) || strings.Contains(h, room.Name) {
+				visited = true
+				break
+			}
+		}
+		// Mark as visited if it's the current room
+		if roomID == currentRoom {
+			visited = true
+		}
+
+		items := make([]ClientItem, 0, len(room.Items))
+		for itemID, item := range room.Items {
+			ci := ClientItem{
+				ID:        itemID,
+				Name:      item.Name,
+				Type:      item.Type,
+				Visible:   item.Visible,
+				Inspected: item.Inspected,
+				State:     item.State,
+			}
+			if len(item.Contains) > 0 {
+				ci.Contains = item.Contains
+			}
+			items = append(items, ci)
+		}
+
+		rooms = append(rooms, ClientRoom{
+			ID:          roomID,
+			Name:        room.Name,
+			Description: room.Description,
+			Current:     roomID == currentRoom,
+			Visited:     visited,
+			Items:       items,
+		})
+	}
+
+	inventory := make([]ClientInventoryItem, 0, len(e.State.Player.Inventory))
+	for _, item := range e.State.Player.Inventory {
+		inventory = append(inventory, ClientInventoryItem{
+			ID:    item.ID,
+			Name:  item.Name,
+			State: item.State,
+		})
+	}
+
+	return map[string]interface{}{
+		"rooms":     rooms,
+		"inventory": inventory,
+		"oxygen":    int(e.OxygenRemaining().Minutes()),
+		"won":       e.State.Won,
+		"history":   e.State.Player.History,
+	}
+}

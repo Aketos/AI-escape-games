@@ -74,6 +74,23 @@ func (s *WSServer) BroadcastSFX(sfx string) {
 	}
 }
 
+// BroadcastGameState sends the current game state to all connected clients.
+func (s *WSServer) BroadcastGameState() {
+	state := s.Engine.GameStateForClient()
+	s.Lock()
+	conns := make([]*safeConn, 0, len(s.clients))
+	for _, c := range s.clients {
+		conns = append(conns, c)
+	}
+	s.Unlock()
+
+	for _, c := range conns {
+		if err := c.WriteJSON(map[string]interface{}{"type": "game_state", "payload": state}); err != nil {
+			log.Printf("Failed to broadcast game state: %v", err)
+		}
+	}
+}
+
 func (s *WSServer) HandleConnections(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -97,6 +114,9 @@ func (s *WSServer) HandleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.WriteJSON(ServerMessage{Type: "status", Payload: "AI Engine Ready"})
+
+	// Send current game state to the new client immediately
+	conn.WriteJSON(map[string]interface{}{"type": "game_state", "payload": s.Engine.GameStateForClient()})
 
 	// 2. Establish AI Bridge. Persona, intro and game state are owned by the
 	// LLM proxy (see internal/ai/llmproxy.go); Unmute only needs a session
