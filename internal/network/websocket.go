@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"escape-game/internal/ai"
 	"escape-game/internal/game"
@@ -98,6 +99,14 @@ func (s *WSServer) HandleConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set WebSocket deadlines: long read timeout to survive silence,
+	// pong handler resets the deadline on each pong.
+	ws.SetReadDeadline(time.Now().Add(120 * time.Second))
+	ws.SetPongHandler(func(string) error {
+		ws.SetReadDeadline(time.Now().Add(120 * time.Second))
+		return nil
+	})
+
 	conn := &safeConn{ws: ws}
 	s.Lock()
 	s.clients[ws] = conn
@@ -114,9 +123,6 @@ func (s *WSServer) HandleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.WriteJSON(ServerMessage{Type: "status", Payload: "AI Engine Ready"})
-
-	// Send current game state to the new client immediately
-	conn.WriteJSON(map[string]interface{}{"type": "game_state", "payload": s.Engine.GameStateForClient()})
 
 	// 2. Establish AI Bridge. Persona, intro and game state are owned by the
 	// LLM proxy (see internal/ai/llmproxy.go); Unmute only needs a session
@@ -145,12 +151,41 @@ C'est ton PREMIER message : le joueur vient de se r√©veiller d'un sommeil cryog√
 		}
 
 		go moshiClient.ReceiveLoop(conn)
+
+		// Wait for the intro to be spoken (approx 15s) before revealing
+		// the game state UI to the player.
+		time.Sleep(15 * time.Second)
+		conn.WriteJSON(ServerMessage{Type: "intro_complete", Payload: ""})
+		conn.WriteJSON(map[string]interface{}{"type": "game_state", "payload": s.Engine.GameStateForClient()})
 	}()
 
 	log.Println("New WebSocket connection established and fully initialized")
 
-	// 3. Graceful Shutdown Hook
+	// 3. Ping ticker: sends a ping every 30s to keep the connection alive
+	// through proxies and load balancers during silence periods.
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				conn.mu.Lock()
+				if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+					log.Printf("WebSocket ping error: %v", err)
+					conn.mu.Unlock()
+					return
+				}
+				conn.mu.Unlock()
+			case <-pingDone:
+				return
+			}
+		}
+	}()
+
+	// 4. Graceful Shutdown Hook
 	defer func() {
+		close(pingDone)
 		s.Lock()
 		delete(s.clients, ws)
 		s.Unlock()
@@ -160,13 +195,15 @@ C'est ton PREMIER message : le joueur vient de se r√©veiller d'un sommeil cryog√
 		moshiClient.Close()
 	}()
 
-	// 4. Handle incoming player streams (Audio & Events)
+	// 5. Handle incoming player streams (Audio & Events)
 	for {
 		messageType, p, err := ws.ReadMessage()
 		if err != nil {
 			log.Printf("WebSocket read error/disconnect: %v", err)
 			break
 		}
+		// Reset read deadline on any message (player is active)
+		ws.SetReadDeadline(time.Now().Add(120 * time.Second))
 
 		// Forward audio bytes to Moshi API
 		if messageType == websocket.TextMessage {

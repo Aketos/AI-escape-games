@@ -152,6 +152,14 @@ func resolveRoomItem(room *RoomState, raw string) (string, *RoomItem) {
 	if key == "" {
 		return "", nil
 	}
+
+	// Strip a leading "zone" prefix from the key when comparing, since the
+	// player often says "inspecter la zone au sol" but the item ID is
+	// "zone_sol" — the word "zone" inflates the score for every zone item
+	// and can cause wrong matches.
+	compareKey := strings.TrimPrefix(key, "zone")
+	zoneStripped := compareKey != key
+
 	bestScore := 0
 	var bestID string
 	var best *RoomItem
@@ -159,7 +167,15 @@ func resolveRoomItem(room *RoomState, raw string) (string, *RoomItem) {
 		if !item.Visible {
 			continue
 		}
-		if s := itemMatchScore(key, id, item.Name); s > bestScore {
+		s := itemMatchScore(key, id, item.Name)
+		// Also score with the zone-stripped key for zone items
+		if item.Type == "zone" && zoneStripped {
+			s2 := itemMatchScore(compareKey, id, item.Name)
+			if s2 > s {
+				s = s2
+			}
+		}
+		if s > bestScore {
 			bestScore, bestID, best = s, id, item
 		}
 	}
@@ -259,17 +275,21 @@ func (e *GameEngine) HandleInspectItem(playerID, itemID string) (response string
 
 	_, item := resolveRoomItem(room, itemID)
 	if item == nil {
+		log.Printf("HandleInspectItem: item %q not found in room %s", itemID, roomID)
 		return "Cet objet n'est pas ici ou n'est pas visible.", "", nil
 	}
 
+	log.Printf("HandleInspectItem: inspecting %q (type=%s, contains=%v)", item.Name, item.Type, item.Contains)
 	item.Inspected = true
 	response = item.DescriptionOnInspect
 	if response == "" {
 		response = fmt.Sprintf("Vous inspectez %s. Il n'y a rien de particulier.", item.Name)
 	}
 
-	if revealContents(room, item) {
+	revealed := revealContents(room, item)
+	if revealed {
 		sfx = "sfx_item_discovered"
+		log.Printf("HandleInspectItem: revealed new items from %q", item.Name)
 	}
 
 	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A inspecté : %s", item.Name))
@@ -290,13 +310,16 @@ func (e *GameEngine) HandleTakeItem(playerID, itemID string) (response string, s
 
 	resolvedID, item := resolveRoomItem(room, itemID)
 	if item == nil {
+		log.Printf("HandleTakeItem: item %q not found in room %s", itemID, roomID)
 		return "Cet objet n'est pas ici ou n'est pas visible.", "", nil
 	}
 
 	if !item.IsCollectible {
+		log.Printf("HandleTakeItem: %q is not collectible", item.Name)
 		return fmt.Sprintf("%s ne peut pas être emporté.", item.Name), "", nil
 	}
 
+	log.Printf("HandleTakeItem: taking %q (id=%s)", item.Name, resolvedID)
 	// Anything hidden inside must not vanish with the container.
 	revealContents(room, item)
 
@@ -306,6 +329,7 @@ func (e *GameEngine) HandleTakeItem(playerID, itemID string) (response string, s
 		State: item.State,
 	})
 	delete(room.Items, resolvedID)
+	log.Printf("HandleTakeItem: inventory now has %d items", len(e.State.Player.Inventory))
 
 	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A ramassé : %s", item.Name))
 
@@ -575,6 +599,8 @@ func (e *GameEngine) StateSnapshot() string {
 			fmt.Fprintf(&b, "- %s\n", h)
 		}
 	}
+
+	b.WriteString("\nRAPPEL : Pour toute action du joueur (inspecter, prendre, utiliser), tu DOIS appeler l'outil correspondant. Ne raconte JAMAIS le résultat d'une action sans l'avoir exécutée via l'outil.\n")
 
 	return b.String()
 }

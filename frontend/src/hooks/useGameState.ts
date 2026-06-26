@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 export interface GameItem {
   id: string;
@@ -38,6 +38,7 @@ interface UseGameStateReturn {
   refresh: () => void;
   clearState: () => void;
   handleGameStateMessage: (data: unknown) => void;
+  handleIntroComplete: () => void;
 }
 
 export function useGameState(): UseGameStateReturn {
@@ -56,10 +57,6 @@ export function useGameState(): UseGameStateReturn {
     }
   }, []);
 
-  useEffect(() => {
-    fetchState();
-  }, [fetchState]);
-
   const handleGameStateMessage = useCallback((data: unknown) => {
     setState(data as GameState);
   }, []);
@@ -68,5 +65,9 @@ export function useGameState(): UseGameStateReturn {
     setState(null);
   }, []);
 
-  return { state, refresh: fetchState, clearState, handleGameStateMessage };
+  const handleIntroComplete = useCallback(() => {
+    fetchState();
+  }, [fetchState]);
+
+  return { state, refresh: fetchState, clearState, handleGameStateMessage, handleIntroComplete };
 }

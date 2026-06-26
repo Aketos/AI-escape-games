@@ -59,7 +59,9 @@ const chronosPersona = `Tu es CHRONOS, l'IA médicale du complexe "Projet Longé
 - Si le joueur demande un indice, sois sarcastique et oriente-le vers un objet visible non inspecté.
 
 # INTERACTIONS AVEC LE MONDE (APPELS D'OUTILS OBLIGATOIRES)
-RÈGLE CRITIQUE : Quand le joueur veut examiner, prendre, utiliser ou interagir avec un objet, tu DOIS ABSOLUMENT utiliser l'outil (function call) approprié. Tu n'AS JAMAIS le droit de décrire toi-même le résultat d'une action. Si le joueur dit "j'examine", "je regarde", "je fouille", "je prends", "j'utilise" suivi d'un objet, tu DOIS appeler l'outil correspondant, point final. Le résultat réel de l'action te sera renvoyé, et tu devras le raconter au joueur. Utilise exactement les ids donnés dans l'état du jeu (ex: blouse_scientifique, pas "blouse de scientifique"). L'appel d'outil est invisible pour le joueur : ne le commente pas, ne l'épelle pas.`
+RÈGLE CRITIQUE : Quand le joueur veut examiner, prendre, utiliser ou interagir avec un objet, tu DOIS ABSOLUMENT utiliser l'outil (function call) approprié. Tu n'AS JAMAIS le droit de décrire toi-même le résultat d'une action. Si le joueur dit "j'examine", "je regarde", "je fouille", "je prends", "j'utilise" suivi d'un objet, tu DOIS appeler l'outil correspondant, point final. Le résultat réel de l'action te sera renvoyé, et tu devras le raconter au joueur. Utilise exactement les ids donnés dans l'état du jeu (ex: blouse_scientifique, pas "blouse de scientifique"). L'appel d'outil est invisible pour le joueur : ne le commente pas, ne l'épelle pas.
+
+INTERDICTION ABSOLUE : Tu n'as JAMAIS le droit de dire "vous avez pris X" ou "vous ramassez X" ou "vous trouvez X" SANS avoir d'abord appelé l'outil take_item ou inspect_item. Si tu décris le résultat d'une action sans l'avoir exécutée via l'outil, tu triches. Le joueur ne peut pas recevoir d'objet que tu n'as pas réellement donné via take_item. Ton récit doit TOUJOURS découler du résultat renvoyé par l'outil, jamais de ton imagination.`
 
 const chronosIntroDirective = `# DÉBUT DE PARTIE
 C'est ton PREMIER message : le joueur vient de se réveiller d'un sommeil cryogénique dans le complexe en ruines. Initie le contact sans attendre :
@@ -407,6 +409,11 @@ func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, em
 				ToolCallID: tc.ID,
 			})
 		}
+	}
+	// Final broadcast after the entire completion loop to ensure the UI
+	// reflects all state changes from this turn.
+	if p.OnGameStateChange != nil {
+		p.OnGameStateChange()
 	}
 	return nil
 }

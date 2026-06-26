@@ -13,6 +13,7 @@ interface UseAudioStreamReturn {
   aiVolume: number;
   logs: string[];
   onGameState: (cb: (data: unknown) => void) => void;
+  onIntroComplete: (cb: () => void) => void;
 }
 
 export function useAudioStream(url: string): UseAudioStreamReturn {
@@ -24,6 +25,7 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
   const [isAISpeaking, setIsAISpeaking] = useState(false);
 
   const gameStateCallbackRef = useRef<((data: unknown) => void) | null>(null);
+  const introCompleteCallbackRef = useRef<(() => void) | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -127,6 +129,10 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
           } else if (data.type === 'game_state') {
             if (gameStateCallbackRef.current) {
               gameStateCallbackRef.current(data.payload);
+            }
+          } else if (data.type === 'intro_complete') {
+            if (introCompleteCallbackRef.current) {
+              introCompleteCallbackRef.current();
             }
           }
         } catch (e) {
@@ -285,5 +291,9 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
     gameStateCallbackRef.current = cb;
   }, []);
 
-  return { status, connect, disconnect, micVolume, aiVolume, logs, onGameState };
+  const onIntroComplete = useCallback((cb: () => void) => {
+    introCompleteCallbackRef.current = cb;
+  }, []);
+
+  return { status, connect, disconnect, micVolume, aiVolume, logs, onGameState, onIntroComplete };
 }

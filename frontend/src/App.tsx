@@ -8,12 +8,16 @@ import { Mic, Terminal, Loader2 } from 'lucide-react';
 function App() {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}//${window.location.host}/ws`;
-  const { status, connect, disconnect, micVolume, aiVolume, logs, onGameState } = useAudioStream(wsUrl);
-  const { state: gameState, clearState, handleGameStateMessage } = useGameState();
+  const { status, connect, disconnect, micVolume, aiVolume, logs, onGameState, onIntroComplete } = useAudioStream(wsUrl);
+  const { state: gameState, clearState, handleGameStateMessage, handleIntroComplete } = useGameState();
 
   useEffect(() => {
     onGameState(handleGameStateMessage);
   }, [onGameState, handleGameStateMessage]);
+
+  useEffect(() => {
+    onIntroComplete(handleIntroComplete);
+  }, [onIntroComplete, handleIntroComplete]);
 
   const handleConnect = () => {
     clearState();

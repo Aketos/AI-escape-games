@@ -47,7 +47,7 @@
     },
     "blouse_scientifique": {
       "name": "Blouse de scientifique déchirée",
-      "visible": true,
+      "visible": false,
       "inspected": false,
       "description_on_inspect": "La blouse est tachée de sang séché. Dans la poche, il y a une fiole en verre et une carte vierge.",
       "contains": [
