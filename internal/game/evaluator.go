@@ -27,6 +27,15 @@ func NewGameEngine(state *GameState) *GameEngine {
 	}
 }
 
+// ReloadState replaces the game state and resets the oxygen timer.
+func (e *GameEngine) ReloadState(state *GameState) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.State = state
+	e.startedAt = time.Now()
+	e.oxygen = 45 * time.Minute
+}
+
 // Lock locks the game engine for safe concurrent access.
 func (e *GameEngine) Lock() {
 	e.mu.Lock()

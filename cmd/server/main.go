@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"escape-game/internal/ai"
 	"escape-game/internal/game"
@@ -14,22 +15,50 @@ import (
 func main() {
 	log.Println("Starting S2S Audio Escape Game server...")
 
-	// 1. Initialize the Game State (FSM) by loading JSON scenarios
-	gameFSM, err := game.LoadScenario("room_state.json", "player_state.json")
+	// Default scenario — can be overridden by ?scenario= on the WebSocket URL.
+	defaultScenario := "projet_longevite"
+
+	// 1. Load language-specific game config (persona, intro, scenario paths)
+	cfg, err := ai.LoadGameConfig(defaultScenario)
+	if err != nil {
+		log.Fatalf("Failed to load game config: %v", err)
+	}
+
+	// 2. Initialize the Game State (FSM) by loading JSON scenarios from the scenario directory
+	gameFSM, err := game.LoadScenario(filepath.Join(cfg.ScenarioDir, "room_state.json"), filepath.Join(cfg.ScenarioDir, "player_state.json"))
 	if err != nil {
 		log.Fatalf("Failed to load scenario: %v", err)
 	}
 	log.Println("Scenario loaded successfully.")
 
-	// 2. Shared game engine: used by both the WebSocket bridge and the LLM proxy.
+	// 3. Shared game engine: used by both the WebSocket bridge and the LLM proxy.
 	engine := game.NewGameEngine(gameFSM)
 
-	// 3. Initialize the WebSocket server
-	wsServer := network.NewWSServer(engine)
+	// 4. Initialize the WebSocket server (shares config with LLM proxy)
+	wsServer := network.NewWSServerWithConfig(engine, cfg, defaultScenario)
 
-	// 4. OpenAI-compatible LLM proxy: Unmute's KYUTAI_LLM_URL must point at
+	// 5. OpenAI-compatible LLM proxy: Unmute's KYUTAI_LLM_URL must point at
 	// this server so game logic stays invisible to the TTS.
-	llmProxy := ai.NewLLMProxyFromEnv(engine, wsServer.BroadcastSFX, wsServer.BroadcastGameState)
+	llmProxy, err := ai.NewLLMProxyFromEnv(engine, defaultScenario, wsServer.BroadcastSFX, wsServer.BroadcastGameState)
+	if err != nil {
+		log.Fatalf("Failed to initialize LLM proxy: %v", err)
+	}
+	wsServer.SetLLMProxy(llmProxy)
+
+	// 6. List available scenarios for the frontend selection UI.
+	lang := os.Getenv("GAME_LANGUAGE")
+	if lang == "" {
+		lang = "fr"
+	}
+	http.HandleFunc("/scenarios", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		scenarios, err := ai.ListScenarios(lang)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(scenarios)
+	})
 
 	http.HandleFunc("/ws", wsServer.HandleConnections)
 	http.HandleFunc("/chat/completions", llmProxy.HandleChatCompletions)
@@ -42,7 +71,7 @@ func main() {
 	})
 	http.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, ferr := os.Stat("function_calls.json")
+		_, ferr := os.Stat(filepath.Join(cfg.ScenarioDir, "function_calls.json"))
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"tools_loaded":        llmProxy.ToolsCount(),
 			"function_calls_json": ferr == nil,

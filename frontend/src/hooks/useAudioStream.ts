@@ -7,7 +7,7 @@ type ConnectionStatus = 'Idle' | 'Booting' | 'Ready' | 'Connected' | 'Disconnect
 
 interface UseAudioStreamReturn {
   status: ConnectionStatus;
-  connect: () => void;
+  connect: (scenario?: string) => void;
   disconnect: () => void;
   micVolume: number;
   aiVolume: number;
@@ -70,7 +70,7 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
     return () => clearInterval(interval);
   }, [isAISpeaking]);
 
-  const connect = async () => {
+  const connect = async (scenario?: string) => {
     if (wsRef.current) return;
     
     addLog("Requesting Microphone...");
@@ -88,7 +88,8 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
       await decoder.ready;
       
       addLog("Microphone ready. Connecting to WebSocket...");
-      const ws = new WebSocket(url);
+      const wsUrlWithScenario = scenario ? `${url}?scenario=${encodeURIComponent(scenario)}` : url;
+      const ws = new WebSocket(wsUrlWithScenario);
       wsRef.current = ws;
 
       if (!ambientAudioRef.current) {

@@ -1,3 +1,0 @@
-3. La configuration des SFX (Sound Effects)
-Votre hook useAudioStream s'attend à trouver des fichiers opus locaux (ex: door_unlock.opus, item_pickup.opus) dans le dossier /public/sounds/ du projet React.
-Si vous n'en avez pas encore, je vous conseille vivement d'utiliser des générateurs d'effets sonores IA comme ElevenLabs Sound Effects ou Suno AI qui permettent de générer gratuitement des sons de très haute qualité (ex: "Bruit de lourde porte blindée rouillée qui grince et s'ouvre").

@@ -1,15 +1,36 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAudioStream } from './hooks/useAudioStream';
 import { useGameState } from './hooks/useGameState';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { GamePanel, InventoryPanel } from './components/GamePanel';
-import { Mic, Terminal, Loader2 } from 'lucide-react';
+import { Mic, Terminal, Loader2, Map } from 'lucide-react';
+
+interface Scenario {
+  id: string;
+  name: string;
+  description: string;
+}
 
 function App() {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}//${window.location.host}/ws`;
   const { status, connect, disconnect, micVolume, aiVolume, logs, onGameState, onIntroComplete } = useAudioStream(wsUrl);
   const { state: gameState, clearState, handleGameStateMessage, handleIntroComplete } = useGameState();
+
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [selectedScenario, setSelectedScenario] = useState<string | null>(null);
+  const [scenariosLoading, setScenariosLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/scenarios')
+      .then((res) => res.json())
+      .then((data: Scenario[]) => {
+        setScenarios(data);
+        if (data.length > 0) setSelectedScenario(data[0].id);
+      })
+      .catch((err) => console.error('Failed to load scenarios:', err))
+      .finally(() => setScenariosLoading(false));
+  }, []);
 
   useEffect(() => {
     onGameState(handleGameStateMessage);
@@ -20,9 +41,12 @@ function App() {
   }, [onIntroComplete, handleIntroComplete]);
 
   const handleConnect = () => {
+    if (!selectedScenario) return;
     clearState();
-    connect();
+    connect(selectedScenario);
   };
+
+  const showScenarioPicker = (status === 'Idle' || status === 'Disconnected') && !scenariosLoading;
 
   return (
     <div className="min-h-screen relative flex flex-col items-center justify-center">
@@ -49,12 +73,47 @@ function App() {
         <AudioVisualizer micVolume={micVolume} aiVolume={aiVolume} />
       </div>
 
-      {/* Action Button */}
-      <div className="z-20">
+      {/* Action Button + Scenario Picker */}
+      <div className="z-20 flex flex-col items-center gap-4">
+        {showScenarioPicker && scenarios.length > 0 && (
+          <div className="bg-black/60 border border-gray-800 p-4 rounded backdrop-blur-sm w-full max-w-md">
+            <div className="flex items-center gap-2 text-[#00ffcc] mb-3 border-b border-gray-800 pb-2">
+              <Map className="w-4 h-4" />
+              <span className="text-xs font-mono uppercase tracking-wider">Select Scenario</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {scenarios.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setSelectedScenario(s.id)}
+                  className={`text-left p-3 rounded border transition-all duration-200 ${
+                    selectedScenario === s.id
+                      ? 'border-[#00ffcc] bg-[#00ffcc]/10 text-[#00ffcc]'
+                      : 'border-gray-800 text-gray-400 hover:border-gray-600'
+                  }`}
+                >
+                  <div className="font-mono font-bold text-sm">{s.name}</div>
+                  {s.description && (
+                    <div className="text-xs text-gray-500 mt-1">{s.description}</div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showScenarioPicker && scenariosLoading && (
+          <div className="text-gray-500 font-mono text-sm flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading scenarios...
+          </div>
+        )}
+
         {status === 'Idle' || status === 'Disconnected' ? (
           <button 
             onClick={handleConnect}
-            className="px-8 py-4 bg-transparent border-2 border-[#00ffcc] text-[#00ffcc] font-mono font-bold tracking-widest uppercase hover:bg-[#00ffcc] hover:text-[#0f0f11] transition-all duration-300 shadow-[0_0_15px_rgba(0,255,204,0.5)]"
+            disabled={!selectedScenario}
+            className="px-8 py-4 bg-transparent border-2 border-[#00ffcc] text-[#00ffcc] font-mono font-bold tracking-widest uppercase hover:bg-[#00ffcc] hover:text-[#0f0f11] transition-all duration-300 shadow-[0_0_15px_rgba(0,255,204,0.5)] disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Connect to Bunker
           </button>

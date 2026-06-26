@@ -4,19 +4,20 @@ REGION ?= fr-par
 REGISTRY_NAME ?= escape-game-repo
 BACKEND_IMAGE ?= escape-game-backend
 FRONTEND_IMAGE ?= escape-game-frontend
+UNMUTE_VOICE ?= cml-tts/fr/12080_11650_000047-0001_enhanced.wav
+LLM_UPSTREAM_URL ?= https://api.scaleway.ai/0cf90930-f182-408a-a3c1-78350db643e4/v1
 TAG ?= latest
 REGISTRY_ENDPOINT ?= rg.$(REGION).scw.cloud/$(REGISTRY_NAME)
 
 SCW_PROJECT_ID ?= $(shell scw config get default-project-id)
-# SCW_SECRET_KEY ?= $(shell scw config get secret-key)
-SCW_SECRET_KEY ?= 49ae0a32-c24b-45ef-a050-cc12ed43c368
-UNMUTE_WS_URL ?= ws://38.244.145.196:40927/v1/realtime
-UNMUTE_VOICE ?= cml-tts/fr/12080_11650_000047-0001_enhanced.wav
-LLM_UPSTREAM_URL ?= https://api.scaleway.ai/0cf90930-f182-408a-a3c1-78350db643e4/v1
+
+# Load local secrets from gitignored secrets.mk
+-include secrets.mk
+
 LLM_MODEL ?= gemma-3-27b-it
 LLM_API_KEY ?= $(SCW_SECRET_KEY)
 
-.PHONY: scw-login build-push-backend build-push-frontend deploy-backend deploy-frontend deploy-all init-registry init-namespace
+.PHONY: scw-login build-push-backend build-push-frontend deploy-backend deploy-frontend deploy-all init-registry init-namespace new-scenario
 
 # 1. Authenticate Docker to Scaleway Container Registry
 scw-login:
@@ -104,3 +105,81 @@ deploy-all: deploy-backend deploy-frontend
 	@NAMESPACE_ID=$$(scw container namespace list name=$(REGISTRY_NAME)-ns region=$(REGION) -o json | jq -r '.[0].id'); \
 	FRONTEND_DOMAIN=$$(scw container container list namespace-id=$$NAMESPACE_ID name=$(FRONTEND_IMAGE)-container region=$(REGION) -o json | jq -r '.[0].domain_name // empty'); \
 	echo "Frontend URL: https://$$FRONTEND_DOMAIN"
+
+# 7. Scaffold a new scenario (interactive)
+# Usage: make new-scenario
+#        (prompts for language and scenario name)
+new-scenario:
+	@read -p "Language (fr/en) [fr]: " LANG_INPUT; \
+	LANG_VAL=$${LANG_INPUT:-fr}; \
+	read -p "Scenario ID (e.g. projet_longevite): " SCENARIO_INPUT; \
+	if [ -z "$$SCENARIO_INPUT" ]; then echo "Scenario ID is required."; exit 1; fi; \
+	DIR=config/$$LANG_VAL/$$SCENARIO_INPUT; \
+	if [ -d "$$DIR" ]; then echo "Scenario '$$SCENARIO_INPUT' already exists in $$DIR"; exit 1; fi; \
+	echo "Creating scenario '$$SCENARIO_INPUT' in $$DIR/..."; \
+	mkdir -p "$$DIR"; \
+	\
+	echo '{' > "$$DIR/scenario.json"; \
+	echo '  "name": "'$$SCENARIO_INPUT'",' >> "$$DIR/scenario.json"; \
+	echo '  "description": ""' >> "$$DIR/scenario.json"; \
+	echo '}' >> "$$DIR/scenario.json"; \
+	\
+	printf '%s\n' \
+		'You are the game master of an escape room.' \
+		'' \
+		'(Replace this with your AI persona for this scenario.)' \
+		> "$$DIR/persona.txt"; \
+	\
+	printf '%s\n' \
+		'You are starting a new game. Set the scene and atmosphere.' \
+		'' \
+		'(Replace this with your intro directive for this scenario.)' \
+		> "$$DIR/intro_directive.txt"; \
+	\
+	printf '%s\n' \
+		'[INTRO] The game begins. Describe the opening situation to the player.' \
+		'' \
+		'(Replace this with your intro prompt for this scenario.)' \
+		> "$$DIR/intro_prompt.txt"; \
+	\
+	printf '%s\n' \
+		'{' \
+		'  "room_id": "starting_room",' \
+		'  "name": "Starting Room",' \
+		'  "description": "A room.",' \
+		'  "items": {}' \
+		'}' \
+		> "$$DIR/room_state.json"; \
+	\
+	printf '%s\n' \
+		'{' \
+		'  "player_id": "p_001",' \
+		'  "current_room": "starting_room",' \
+		'  "inventory": [],' \
+		'  "history": []' \
+		'}' \
+		> "$$DIR/player_state.json"; \
+	\
+	printf '%s\n' \
+		'{' \
+		'  "tools": [' \
+		'    {' \
+		'      "name": "inspect_item",' \
+		'      "description": "Called when the player wants to examine an object.",' \
+		'      "parameters": {' \
+		'        "type": "object",' \
+		'        "properties": {' \
+		'          "target_item": {' \
+		'            "type": "string",' \
+		'            "description": "The ID of the item to inspect."' \
+		'          }' \
+		'        },' \
+		'        "required": ["target_item"]' \
+		'      }' \
+		'    }' \
+		'  ]' \
+		'}' \
+		> "$$DIR/function_calls.json"; \
+	\
+	echo "Done! Edit the files in $$DIR/ to define your scenario."; \
+	echo "Files created: scenario.json persona.txt intro_directive.txt intro_prompt.txt room_state.json player_state.json function_calls.json"

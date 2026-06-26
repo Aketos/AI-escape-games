@@ -22,8 +22,7 @@ WORKDIR /app
 COPY --from=builder /server .
 
 # Copy scenario configuration files into working directory
-COPY function_calls.json player_state.json room_state.json ./
-
+COPY config/ ./config/
 # Expose WebSocket port
 EXPOSE 8080
 

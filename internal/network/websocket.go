@@ -2,9 +2,11 @@ package network
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -46,16 +48,70 @@ func (c *safeConn) WriteJSON(v interface{}) error {
 // WSServer manages WebSocket connections for the game.
 type WSServer struct {
 	sync.Mutex
-	Engine  *game.GameEngine
-	clients map[*websocket.Conn]*safeConn
+	Engine   *game.GameEngine
+	clients  map[*websocket.Conn]*safeConn
+	config   *ai.GameConfig
+	scenario string
+	llmProxy *ai.LLMProxy // set via SetLLMProxy for scenario reload
 }
 
-// NewWSServer initializes the WSServer with the shared game engine.
-func NewWSServer(engine *game.GameEngine) *WSServer {
-	return &WSServer{
-		Engine:  engine,
-		clients: make(map[*websocket.Conn]*safeConn),
+// NewWSServer initializes the WSServer with the shared game engine and
+// default scenario.
+func NewWSServer(engine *game.GameEngine, scenario string) *WSServer {
+	cfg, err := ai.LoadGameConfig(scenario)
+	if err != nil {
+		log.Fatalf("Failed to load game config: %v", err)
 	}
+	return &WSServer{
+		Engine:   engine,
+		clients:  make(map[*websocket.Conn]*safeConn),
+		config:   cfg,
+		scenario: scenario,
+	}
+}
+
+// NewWSServerWithConfig initializes the WSServer with a pre-loaded game config.
+func NewWSServerWithConfig(engine *game.GameEngine, cfg *ai.GameConfig, scenario string) *WSServer {
+	return &WSServer{
+		Engine:   engine,
+		clients:  make(map[*websocket.Conn]*safeConn),
+		config:   cfg,
+		scenario: scenario,
+	}
+}
+
+// SetLLMProxy links the LLM proxy so scenario reloads can update its config.
+func (s *WSServer) SetLLMProxy(p *ai.LLMProxy) {
+	s.llmProxy = p
+}
+
+// ReloadScenario reinitializes the game engine and config for a new scenario.
+func (s *WSServer) ReloadScenario(scenario string) error {
+	cfg, err := ai.LoadGameConfig(scenario)
+	if err != nil {
+		return err
+	}
+
+	gameFSM, err := game.LoadScenario(
+		filepath.Join(cfg.ScenarioDir, "room_state.json"),
+		filepath.Join(cfg.ScenarioDir, "player_state.json"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to load scenario %q: %w", scenario, err)
+	}
+
+	s.Lock()
+	s.config = cfg
+	s.scenario = scenario
+	s.Engine.ReloadState(gameFSM)
+	s.Unlock()
+
+	if s.llmProxy != nil {
+		s.llmProxy.UpdateConfig(cfg)
+	}
+
+	log.Printf("Scenario reloaded: %s", scenario)
+	return nil
 }
 
 // BroadcastSFX sends a sound effect trigger to all connected players. It is
@@ -93,6 +149,20 @@ func (s *WSServer) BroadcastGameState() {
 }
 
 func (s *WSServer) HandleConnections(w http.ResponseWriter, r *http.Request) {
+	// Check for scenario query param; reload if different from current
+	if scenario := r.URL.Query().Get("scenario"); scenario != "" {
+		s.Lock()
+		current := s.scenario
+		s.Unlock()
+		if current != scenario {
+			if err := s.ReloadScenario(scenario); err != nil {
+				log.Printf("Failed to reload scenario %q: %v", scenario, err)
+				http.Error(w, "Invalid scenario", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
@@ -139,13 +209,7 @@ func (s *WSServer) HandleConnections(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		introPrompt := `# DÉBUT DE PARTIE
-C'est ton PREMIER message : le joueur vient de se réveiller d'un sommeil cryogénique dans le complexe en ruines. Initie le contact sans attendre :
-1. Déclare une alerte critique : le caisson numéro 4 est ouvert, il reste 45 minutes d'oxygène.
-2. Présente-toi froidement comme CHRONOS.
-3. Fais une remarque condescendante sur l'accélération de son rythme cardiaque.
-4. Décris UNIQUEMENT ce qui est visible dans l'état du jeu.
-5. Termine en demandant avec sarcasme s'il compte agir ou s'asphyxier en silence.`
+		introPrompt := s.config.IntroPrompt
 		if err := moshiClient.SendHiddenPrompt(introPrompt); err != nil {
 			log.Printf("Failed to send intro prompt to Unmute: %v", err)
 		}

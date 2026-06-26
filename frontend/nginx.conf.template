@@ -32,4 +32,9 @@ server {
         proxy_pass ${BACKEND_URL}/game-state;
         proxy_ssl_server_name on;
     }
+
+    location /scenarios {
+        proxy_pass ${BACKEND_URL}/scenarios;
+        proxy_ssl_server_name on;
+    }
 }

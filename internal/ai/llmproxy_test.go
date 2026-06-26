@@ -93,6 +93,7 @@ func TestProxyToolCallAndContinue(t *testing.T) {
 		Model:       "test-model",
 		APIKey:      "test-key",
 		httpClient:  upstream.Client(),
+		config:      &GameConfig{Persona: "test persona", IntroDirective: "test intro", IntroPrompt: "test prompt"},
 	}
 
 	body := `{"stream": true, "messages": [
@@ -153,6 +154,7 @@ func TestProxyPassthroughWithoutTags(t *testing.T) {
 		Model:       "test-model",
 		APIKey:      "test-key",
 		httpClient:  upstream.Client(),
+		config:      &GameConfig{Persona: "test persona", IntroDirective: "test intro", IntroPrompt: "test prompt"},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
@@ -196,13 +198,13 @@ func TestRewriteMessagesFirstTurn(t *testing.T) {
 			"hidden_item":  {Name: "Carte secrète", Visible: false},
 		},
 	}
-	p := &LLMProxy{Engine: game.NewGameEngine(state), Model: "m"}
+	p := &LLMProxy{Engine: game.NewGameEngine(state), Model: "m", config: &GameConfig{Persona: "test persona", IntroDirective: "test intro", IntroPrompt: "test prompt"}}
 
 	first := p.rewriteMessages([]ChatMessage{
 		{Role: "system", Content: "unmute template"},
 		{Role: "user", Content: "bonjour"},
 	})
-	if first[0].Role != "system" || !strings.Contains(first[0].Content, "DÉBUT DE PARTIE") {
+	if first[0].Role != "system" || !strings.Contains(first[0].Content, "test intro") {
 		t.Error("first turn must include the intro directive")
 	}
 	if !strings.Contains(first[0].Content, "Terminal") {
