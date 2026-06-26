@@ -3,57 +3,91 @@
 A platform for creating and playing **voice-driven escape games** powered by AI. The entire interface is audio: the player speaks, an AI game master responds, and game logic (inventory, room state, puzzles) is managed server-side via LLM tool calls — invisible to the player. Each scenario defines its own AI persona, puzzles, rooms, and sound effects — the platform handles the rest.
 
 ```mermaid
-graph LR
-    subgraph F["⚛️ Frontend"]
+flowchart TB
+    %% ===== PLAYER =====
+    Player(["🎙️ Player"])
+    style Player fill:#1a1a2e,stroke:#ff6b6b,stroke-width:2px,color:#ff6b6b
+
+    %% ===== FRONTEND =====
+    subgraph FE["⚛️ Frontend — React · TypeScript · Tailwind"]
         direction TB
-        UI["Scenario Picker\nVisualizer · Panels · SFX"]
-    end
+        SUI["📋 Scenario Selection\n+ Difficulty Badge"]
+        VIS["📊 Audio Visualizer\n(Mic + AI volume)"]
+        PANELS["🗺️ Game Panels\n(Rooms · Inventory)"]
+        SFX["🔊 SFX Player\n(per-scenario .opus)"]
+        ENC["🎤 Opus Encoder\n(opus-recorder)"]
+        DEC["🔈 Opus Decoder\n(ogg-opus-decoder)"]
+        WSC{{"WebSocket Client"}}
 
-    subgraph G["🦫 Go Backend"]
+        SUI --> WSC
+        ENC -->|"opus frames"| WSC
+        WSC -->|"ai_audio_chunk"| DEC
+        WSC -->|"sfx_trigger"| SFX
+        WSC -->|"game_state"| PANELS
+        DEC --> VIS
+    end
+    style FE fill:#0a0a12,stroke:#00ffcc,stroke-width:1px,color:#00ffcc
+
+    %% ===== GO BACKEND =====
+    subgraph BE["🦫 Go Backend"]
         direction TB
-        WS["WebSocket Server"]
-        PX["LLM Proxy"]
-        GE["Game Engine\n(FSM)"]
-        WS --> PX --> GE
+        WSS{{"WebSocket Server\n:8080/ws"}}
+        subgraph PROXY["LLM Proxy — OpenAI-compatible"]
+            direction TB
+            INJECT["📝 System Prompt Builder\n(Persona + Game State\n+ Tool Definitions)"]
+            DISPATCH["⚙️ Tool Call Dispatcher"]
+            INJECT --> DISPATCH
+        end
+        subgraph ENGINE["Game Engine"]
+            direction TB
+            FSM["🔄 Finite State Machine"]
+            ROOMS["🏠 Room State\n(items · locks · puzzles)"]
+            PLAYER_S["� Player State\n(inventory · history)"]
+            FSM --> ROOMS
+            FSM --> PLAYER_S
+        end
+        WSS --> INJECT
+        DISPATCH -->|"execute"| FSM
+        FSM -->|"results"| DISPATCH
+        FSM -.->|"sfx + state"| WSS
     end
+    style BE fill:#0a0a12,stroke:#f0c674,stroke-width:1px,color:#f0c674
+    style PROXY fill:#111108,stroke:#f0c67466
+    style ENGINE fill:#111108,stroke:#f0c67466
 
-    subgraph U["🔊 Unmute"]
+    %% ===== UNMUTE =====
+    subgraph UM["🔊 Unmute — Kyutai Labs"]
         direction TB
-        STT["STT"]
-        TTS["TTS"]
+        STT["🗣️ Speech-to-Text"]
+        TTS["🔊 Text-to-Speech"]
+        STT -->|"transcript"| TTS
     end
+    style UM fill:#0a0a12,stroke:#a78bfa,stroke-width:1px,color:#a78bfa
 
-    subgraph C["☁️ Scaleway"]
-        LLM["LLM\n(gemma-3-27b)"]
+    %% ===== CLOUD =====
+    subgraph SC["☁️ Scaleway AI"]
+        LLM["🧠 LLM\nGemma-3-27B-IT"]
     end
+    style SC fill:#0a0a12,stroke:#60a5fa,stroke-width:1px,color:#60a5fa
 
-    Player["🎙️ Player"] ==>|"audio"| WS
-    WS ==>|"audio"| STT
-    STT -->|"text"| TTS
-    TTS -->|"chat/completions"| PX
-    PX -->|"prompt + tools"| LLM
-    LLM -->|"response +\ntool_calls"| PX
-    PX -->|"narration"| TTS
-    TTS ==>|"audio"| WS
-    WS ==>|"audio + state"| Player
-    GE -.->|"sfx + game state"| WS
+    %% ===== CONNECTIONS =====
+    Player ==>|"speaks"| ENC
+    Player -.- SUI
 
-    classDef frontend fill:#0d1117,stroke:#00ffcc,color:#00ffcc
-    classDef backend fill:#0d1117,stroke:#f0c674,color:#f0c674
-    classDef unmute fill:#0d1117,stroke:#a78bfa,color:#a78bfa
-    classDef cloud fill:#0d1117,stroke:#60a5fa,color:#60a5fa
-    classDef player fill:#0d1117,stroke:#ff6b6b,color:#ff6b6b
+    WSC ==>|"opus audio\n?scenario=id"| WSS
+    WSS ==>|"audio stream"| STT
 
-    class UI frontend
-    class WS,PX,GE backend
-    class STT,TTS unmute
-    class LLM cloud
-    class Player player
+    TTS -->|"POST /chat/completions"| INJECT
+    INJECT -->|"rewritten prompt\n+ tool defs"| LLM
+    LLM -->|"response\n+ tool_calls"| DISPATCH
 
-    style F fill:#0a0a0a,stroke:#00ffcc33
-    style G fill:#0a0a0a,stroke:#f0c67433
-    style U fill:#0a0a0a,stroke:#a78bfa33
-    style C fill:#0a0a0a,stroke:#60a5fa33
+    DISPATCH -->|"narration text"| TTS
+    TTS ==>|"audio chunks"| WSS
+    WSS ==>|"ai_audio_chunk"| WSC
+    WSC ==>|"audio"| DEC
+    DEC -->|"🔊"| Player
+
+    WSS -.->|"broadcast\nsfx + game_state"| WSC
 ```
 
 ---
