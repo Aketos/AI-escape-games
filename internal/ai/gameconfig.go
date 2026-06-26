@@ -22,6 +22,7 @@ type ScenarioInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Difficulty  string `json:"difficulty"`
 }
 
 // ListScenarios returns the list of available scenarios for the given language.
@@ -54,12 +55,14 @@ func ListScenarios(lang string) ([]ScenarioInfo, error) {
 			var meta struct {
 				Name        string `json:"name"`
 				Description string `json:"description"`
+				Difficulty  string `json:"difficulty"`
 			}
 			if json.Unmarshal(data, &meta) == nil {
 				if meta.Name != "" {
 					info.Name = meta.Name
 				}
 				info.Description = meta.Description
+				info.Difficulty = meta.Difficulty
 			}
 		}
 

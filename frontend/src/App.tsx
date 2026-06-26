@@ -3,12 +3,13 @@ import { useAudioStream } from './hooks/useAudioStream';
 import { useGameState } from './hooks/useGameState';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { GamePanel, InventoryPanel } from './components/GamePanel';
-import { Mic, Terminal, Loader2, Map } from 'lucide-react';
+import { Mic, Terminal, Loader2, Map, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface Scenario {
   id: string;
   name: string;
   description: string;
+  difficulty: string;
 }
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<string | null>(null);
   const [scenariosLoading, setScenariosLoading] = useState(true);
+  const [logsExpanded, setLogsExpanded] = useState(false);
 
   useEffect(() => {
     fetch('/scenarios')
@@ -92,7 +94,16 @@ function App() {
                       : 'border-gray-800 text-gray-400 hover:border-gray-600'
                   }`}
                 >
-                  <div className="font-mono font-bold text-sm">{s.name}</div>
+                  <div className="flex items-center justify-between">
+                    <div className="font-mono font-bold text-sm">{s.name}</div>
+                    {s.difficulty && (
+                      <span className={`text-xs font-mono px-2 py-0.5 rounded ${
+                        s.difficulty === 'hard' ? 'bg-red-500/20 text-red-400' :
+                        s.difficulty === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-green-500/20 text-green-400'
+                      }`}>{s.difficulty}</span>
+                    )}
+                  </div>
                   {s.description && (
                     <div className="text-xs text-gray-500 mt-1">{s.description}</div>
                   )}
@@ -138,18 +149,28 @@ function App() {
         )}
       </div>
 
-      {/* Terminal UI */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-full max-w-2xl bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm">
-        <div className="flex items-center gap-2 text-gray-500 mb-2 border-b border-gray-800 pb-2">
-          <Terminal className="w-4 h-4" />
-          <span className="text-xs font-mono uppercase tracking-wider">System Logs</span>
-        </div>
-        <div className="h-32 overflow-y-auto font-mono text-sm text-[#00ffcc] flex flex-col gap-1">
-          {logs.map((log, i) => (
-            <div key={i} className="opacity-80 hover:opacity-100">{log}</div>
-          ))}
-          {logs.length === 0 && <div className="text-gray-600 italic">Awaiting connection...</div>}
-        </div>
+      {/* Terminal UI — collapsible, bottom-right */}
+      <div className={`absolute bottom-6 right-6 z-30 transition-all duration-300 ${logsExpanded ? 'w-96' : 'w-48'}`}>
+        <button
+          onClick={() => setLogsExpanded(!logsExpanded)}
+          className="w-full flex items-center justify-between bg-black/60 border border-gray-800 px-3 py-2 rounded backdrop-blur-sm text-gray-500 hover:text-[#00ffcc] transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4" />
+            <span className="text-xs font-mono uppercase tracking-wider">System Logs</span>
+          </div>
+          {logsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+        </button>
+        {logsExpanded && (
+          <div className="mt-1 bg-black/60 border border-gray-800 p-3 rounded backdrop-blur-sm">
+            <div className="h-40 overflow-y-auto font-mono text-sm text-[#00ffcc] flex flex-col gap-1">
+              {logs.map((log, i) => (
+                <div key={i} className="opacity-80 hover:opacity-100">{log}</div>
+              ))}
+              {logs.length === 0 && <div className="text-gray-600 italic">Awaiting connection...</div>}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
