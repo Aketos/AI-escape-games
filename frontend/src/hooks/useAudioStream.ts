@@ -36,6 +36,7 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
   const decoderRef = useRef<OggOpusDecoderWebWorker | null>(null);
   const micAnalyserTimerRef = useRef<number | null>(null);
   const nextPlayTimeRef = useRef(0);
+  const scenarioRef = useRef<string>('');
 
   const addLog = useCallback((msg: string) => {
     setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
@@ -72,6 +73,7 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
 
   const connect = async (scenario?: string) => {
     if (wsRef.current) return;
+    scenarioRef.current = scenario || '';
     
     addLog("Requesting Microphone...");
     try {
@@ -114,7 +116,8 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
             addLog(data.payload);
           } else if (data.type === 'sfx_trigger') {
             addLog(`SFX Trigger: ${data.payload}`);
-            const audio = new Audio(`/sounds/${data.payload}.opus`);
+            const scenarioPath = scenarioRef.current ? `${scenarioRef.current}/` : '';
+            const audio = new Audio(`/sounds/${scenarioPath}${data.payload}.opus`);
             audio.volume = 0.85; // Set default SFX volume high enough to be immersive
             audio.play().catch(e => console.warn(`Could not play SFX ${data.payload}.opus:`, e));
           } else if (data.type === 'ai_audio_chunk') {

@@ -181,5 +181,9 @@ new-scenario:
 		'}' \
 		> "$$DIR/function_calls.json"; \
 	\
+	SOUNDS_DIR=frontend/public/sounds/$$SCENARIO_INPUT; \
+	mkdir -p "$$SOUNDS_DIR"; \
+	\
 	echo "Done! Edit the files in $$DIR/ to define your scenario."; \
-	echo "Files created: scenario.json persona.txt intro_directive.txt intro_prompt.txt room_state.json player_state.json function_calls.json"
+	echo "Config files: scenario.json persona.txt intro_directive.txt intro_prompt.txt room_state.json player_state.json function_calls.json"; \
+	echo "SFX directory: $$SOUNDS_DIR/ (place .opus files here)"
