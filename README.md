@@ -2,7 +2,59 @@
 
 A platform for creating and playing **voice-driven escape games** powered by AI. The entire interface is audio: the player speaks, an AI game master responds, and game logic (inventory, room state, puzzles) is managed server-side via LLM tool calls — invisible to the player. Each scenario defines its own AI persona, puzzles, rooms, and sound effects — the platform handles the rest.
 
-![Architecture](architecture.png)
+```mermaid
+graph LR
+    subgraph F["⚛️ Frontend"]
+        direction TB
+        UI["Scenario Picker\nVisualizer · Panels · SFX"]
+    end
+
+    subgraph G["🦫 Go Backend"]
+        direction TB
+        WS["WebSocket Server"]
+        PX["LLM Proxy"]
+        GE["Game Engine\n(FSM)"]
+        WS --> PX --> GE
+    end
+
+    subgraph U["🔊 Unmute"]
+        direction TB
+        STT["STT"]
+        TTS["TTS"]
+    end
+
+    subgraph C["☁️ Scaleway"]
+        LLM["LLM\n(gemma-3-27b)"]
+    end
+
+    Player["🎙️ Player"] ==>|"audio"| WS
+    WS ==>|"audio"| STT
+    STT -->|"text"| TTS
+    TTS -->|"chat/completions"| PX
+    PX -->|"prompt + tools"| LLM
+    LLM -->|"response +\ntool_calls"| PX
+    PX -->|"narration"| TTS
+    TTS ==>|"audio"| WS
+    WS ==>|"audio + state"| Player
+    GE -.->|"sfx + game state"| WS
+
+    classDef frontend fill:#0d1117,stroke:#00ffcc,color:#00ffcc
+    classDef backend fill:#0d1117,stroke:#f0c674,color:#f0c674
+    classDef unmute fill:#0d1117,stroke:#a78bfa,color:#a78bfa
+    classDef cloud fill:#0d1117,stroke:#60a5fa,color:#60a5fa
+    classDef player fill:#0d1117,stroke:#ff6b6b,color:#ff6b6b
+
+    class UI frontend
+    class WS,PX,GE backend
+    class STT,TTS unmute
+    class LLM cloud
+    class Player player
+
+    style F fill:#0a0a0a,stroke:#00ffcc33
+    style G fill:#0a0a0a,stroke:#f0c67433
+    style U fill:#0a0a0a,stroke:#a78bfa33
+    style C fill:#0a0a0a,stroke:#60a5fa33
+```
 
 ---
 
