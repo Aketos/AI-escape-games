@@ -63,6 +63,7 @@ func main() {
 	http.HandleFunc("/ws", wsServer.HandleConnections)
 	http.HandleFunc("/chat/completions", llmProxy.HandleChatCompletions)
 	http.HandleFunc("/v1/chat/completions", llmProxy.HandleChatCompletions)
+	http.HandleFunc("/api/simulate", llmProxy.HandleSimulationChat)
 	http.HandleFunc("/models", llmProxy.HandleModels)
 	http.HandleFunc("/v1/models", llmProxy.HandleModels)
 	http.HandleFunc("/game-state", func(w http.ResponseWriter, r *http.Request) {

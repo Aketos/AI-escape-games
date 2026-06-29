@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"escape-game/internal/game"
@@ -29,6 +30,7 @@ import (
 //     feeds the result back as a tool role message so CHRONOS narrates
 //     the outcome in the same spoken reply.
 type LLMProxy struct {
+	mu                sync.Mutex
 	Engine            *game.GameEngine
 	UpstreamURL       string // OpenAI-compatible base URL, e.g. https://api.scaleway.ai/v1
 	Model             string
@@ -150,6 +152,66 @@ func (p *LLMProxy) HandleModels(w http.ResponseWriter, r *http.Request) {
 		"data": []map[string]interface{}{
 			{"id": p.Model, "object": "model", "owned_by": "escape-game"},
 		},
+	})
+}
+
+// HandleSimulationChat implements POST /api/simulate. It accepts a plain-text
+// user message, builds a full conversation with persona + game state, calls
+// the upstream LLM (non-streaming), executes any tool calls, and returns the
+// narration + updated game state as JSON. This bypasses Unmute entirely.
+func (p *LLMProxy) HandleSimulationChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error": "method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Message  string `json:"message"`
+		Scenario string `json:"scenario"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "bad request: %v"}`, err), http.StatusBadRequest)
+		return
+	}
+
+	// Reload scenario if different from current
+	if req.Scenario != "" {
+		p.mu.Lock()
+		current := p.config.ScenarioDir
+		p.mu.Unlock()
+		expectedDir := filepath.Join(filepath.Dir(current), req.Scenario)
+		if current != expectedDir {
+			cfg, err := LoadGameConfig(req.Scenario)
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error": "failed to load scenario: %v"}`, err), http.StatusBadRequest)
+				return
+			}
+			p.UpdateConfig(cfg)
+		}
+	}
+
+	// Build messages: system (persona + game state) + user message
+	messages := p.rewriteMessages([]ChatMessage{
+		{Role: "user", Content: req.Message},
+	})
+
+	// Run the completion loop with a collecting emitter
+	var full strings.Builder
+	err := p.runCompletionLoop(r, messages, func(s string) { full.WriteString(s) })
+	narration := full.String()
+	if err != nil {
+		narration = "Mes circuits de liaison neuronale subissent une interférence. Répétez, sujet."
+	}
+
+	// Broadcast game state change so any connected WS clients update too
+	if p.OnGameStateChange != nil {
+		p.OnGameStateChange()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"narration":  narration,
+		"game_state": p.Engine.GameStateForClient(),
 	})
 }
 

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useAudioStream } from './hooks/useAudioStream';
 import { useGameState } from './hooks/useGameState';
+import { useSimulation } from './hooks/useSimulation';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { GamePanel, InventoryPanel } from './components/GamePanel';
-import { Mic, Terminal, Loader2, Map, ChevronUp, ChevronDown } from 'lucide-react';
+import { SimulationPanel } from './components/SimulationPanel';
+import { Mic, Terminal, Loader2, Map, ChevronUp, ChevronDown, FlaskConical } from 'lucide-react';
 import { roomImage } from './utils/imagePath';
 
 interface Scenario {
@@ -18,11 +20,14 @@ function App() {
   const wsUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}//${window.location.host}/ws`;
   const { status, connect, disconnect, micVolume, aiVolume, logs, onGameState, onIntroComplete } = useAudioStream(wsUrl);
   const { state: gameState, clearState, handleGameStateMessage, handleIntroComplete } = useGameState();
+  const sim = useSimulation();
 
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<string | null>(null);
   const [scenariosLoading, setScenariosLoading] = useState(true);
   const [logsExpanded, setLogsExpanded] = useState(false);
+  const [simulationMode, setSimulationMode] = useState(false);
+  const [simActive, setSimActive] = useState(false);
 
   useEffect(() => {
     fetch('/scenarios')
@@ -45,14 +50,53 @@ function App() {
 
   const handleConnect = () => {
     if (!selectedScenario) return;
+    if (simulationMode) {
+      sim.reset();
+      setSimActive(true);
+      return;
+    }
     clearState();
     connect(selectedScenario);
   };
 
-  const showScenarioPicker = (status === 'Idle' || status === 'Disconnected') && !scenariosLoading;
+  const handleDisconnect = () => {
+    if (simActive) {
+      setSimActive(false);
+      sim.reset();
+      return;
+    }
+    disconnect();
+  };
 
-  const currentRoom = gameState?.rooms.find(r => r.current);
+  const handleSimSend = (message: string) => {
+    if (selectedScenario) {
+      sim.sendMessage(message, selectedScenario);
+    }
+  };
+
+  const handleSimReset = () => {
+    sim.reset();
+  };
+
+  const showScenarioPicker = (status === 'Idle' || status === 'Disconnected') && !scenariosLoading && !simActive;
+  const isConnected = simActive || status === 'Connected' || status === 'Ready' || status === 'Booting';
+
+  const currentRoom = (simActive ? sim.gameState : gameState)?.rooms.find(r => r.current);
   const bgImage = roomImage(selectedScenario, currentRoom?.image);
+
+  if (simActive) {
+    return (
+      <SimulationPanel
+        messages={sim.messages}
+        gameState={sim.gameState}
+        loading={sim.loading}
+        error={sim.error}
+        scenario={selectedScenario}
+        onSend={handleSimSend}
+        onReset={handleSimReset}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen relative flex flex-col items-center justify-center">
@@ -121,6 +165,24 @@ function App() {
                 </button>
               ))}
             </div>
+
+            {/* Simulation mode toggle */}
+            <label className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-800 cursor-pointer group">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={simulationMode}
+                  onChange={(e) => setSimulationMode(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-700 rounded-full peer-checked:bg-[#00ffcc]/40 transition-colors"></div>
+                <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-gray-400 rounded-full peer-checked:bg-[#00ffcc] peer-checked:translate-x-4 transition-all"></div>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-mono text-gray-500 group-hover:text-[#00ffcc] transition-colors">
+                <FlaskConical className="w-3.5 h-3.5" />
+                <span>Mode Simulation (sans Unmute)</span>
+              </div>
+            </label>
           </div>
         )}
 
@@ -131,13 +193,17 @@ function App() {
           </div>
         )}
 
-        {status === 'Idle' || status === 'Disconnected' ? (
+        {!isConnected ? (
           <button 
             onClick={handleConnect}
             disabled={!selectedScenario}
-            className="px-8 py-4 bg-transparent border-2 border-[#00ffcc] text-[#00ffcc] font-mono font-bold tracking-widest uppercase hover:bg-[#00ffcc] hover:text-[#0f0f11] transition-all duration-300 shadow-[0_0_15px_rgba(0,255,204,0.5)] disabled:opacity-30 disabled:cursor-not-allowed"
+            className={`px-8 py-4 bg-transparent border-2 font-mono font-bold tracking-widest uppercase transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed ${
+              simulationMode
+                ? 'border-purple-400 text-purple-400 hover:bg-purple-400 hover:text-[#0f0f11] shadow-[0_0_15px_rgba(168,85,247,0.5)]'
+                : 'border-[#00ffcc] text-[#00ffcc] hover:bg-[#00ffcc] hover:text-[#0f0f11] shadow-[0_0_15px_rgba(0,255,204,0.5)]'
+            }`}
           >
-            Connect to Bunker
+            {simulationMode ? 'Start Simulation' : 'Connect to Bunker'}
           </button>
         ) : status === 'Booting' ? (
           <button 
@@ -149,9 +215,7 @@ function App() {
           </button>
         ) : (
           <button 
-            onPointerDown={() => { /* Implement push-to-mute if needed */ }}
-            onPointerUp={() => { /* Implement push-to-mute if needed */ }}
-            onClick={disconnect}
+            onClick={handleDisconnect}
             className="px-8 py-4 bg-transparent border-2 border-[#ff3333] text-[#ff3333] font-mono font-bold tracking-widest uppercase hover:bg-[#ff3333] hover:text-[#0f0f11] transition-all duration-300 shadow-[0_0_15px_rgba(255,51,51,0.5)] flex items-center gap-3"
           >
             <Mic className="w-5 h-5" />
