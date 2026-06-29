@@ -449,11 +449,8 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 		}
 	}
 
-	// Consume the inventory item if the target uses it up (e.g. blank card
-	// swallowed by the encoder).
-	if targetItem.ConsumesItem {
-		e.removeFromInventory(invID)
-	}
+	// Always consume the inventory item after successful use.
+	e.removeFromInventory(invID)
 
 	if targetItem.WinsGame {
 		e.State.Won = true
@@ -534,6 +531,7 @@ func (e *GameEngine) HandleGoTo(playerID, targetRoomID string) (response string,
 	}
 
 	e.State.Player.CurrentRoom = targetRoomID
+	target.Visited = true
 	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("S'est déplacé vers : %s", target.Name))
 
 	log.Printf("HandleGoTo: player moved to %q (%s)", targetRoomID, target.Name)
@@ -672,8 +670,15 @@ func (engine *GameEngine) GetContextString() string {
 	visibleCount := 0
 
 	if ok {
-		for id, item := range room.Items {
-			if !item.Visible {
+		inspectItemIDs := room.ItemOrder
+		if len(inspectItemIDs) == 0 {
+			for id := range room.Items {
+				inspectItemIDs = append(inspectItemIDs, id)
+			}
+		}
+		for _, id := range inspectItemIDs {
+			item, ok := room.Items[id]
+			if !ok || !item.Visible {
 				continue
 			}
 			visibleCount++
@@ -724,8 +729,15 @@ func (e *GameEngine) StateSnapshot() string {
 	if ok {
 		fmt.Fprintf(&b, "Salle actuelle : %s — %s\n", room.Name, room.Description)
 		b.WriteString("Objets VISIBLES (les SEULS objets dont tu as le droit de parler) :\n")
-		for id, item := range room.Items {
-			if !item.Visible {
+		itemIDs := room.ItemOrder
+		if len(itemIDs) == 0 {
+			for id := range room.Items {
+				itemIDs = append(itemIDs, id)
+			}
+		}
+		for _, id := range itemIDs {
+			item, ok := room.Items[id]
+			if !ok || !item.Visible {
 				continue
 			}
 			fmt.Fprintf(&b, "- %s (id: %s)", item.Name, id)
@@ -745,8 +757,15 @@ func (e *GameEngine) StateSnapshot() string {
 	// List accessible rooms (doors that are visible and unlocked)
 	if room != nil {
 		var accessible []string
-		for _, item := range room.Items {
-			if !item.Visible || item.State == "locked" {
+		doorItemIDs := room.ItemOrder
+		if len(doorItemIDs) == 0 {
+			for id := range room.Items {
+				doorItemIDs = append(doorItemIDs, id)
+			}
+		}
+		for _, itemID := range doorItemIDs {
+			item, ok := room.Items[itemID]
+			if !ok || !item.Visible || item.State == "locked" {
 				continue
 			}
 			// Check if this item is a door/passage by matching significant words
@@ -798,7 +817,7 @@ func (e *GameEngine) StateSnapshot() string {
 		}
 	}
 
-	b.WriteString("\nRAPPEL : Pour toute action du joueur (inspecter, prendre, utiliser), tu DOIS appeler l'outil correspondant. Ne raconte JAMAIS le résultat d'une action sans l'avoir exécutée via l'outil.\n")
+	b.WriteString("\nRAPPEL : Pour toute action du joueur (inspecter, prendre, utiliser, se déplacer, entrer un code), tu DOIS appeler l'outil correspondant. Ne raconte JAMAIS le résultat d'une action sans l'avoir exécutée via l'outil. Si un objet est en état 'waiting_pin' et que le joueur dit des chiffres, appelle input_pin_code avec ces chiffres.\n")
 	b.WriteString("MATCHING : Le joueur peut désigner un objet par une description partielle. Fais correspondre ses mots au NOM de l'objet (pas à l'ID). Ex: 'le bureau' correspond à 'Le bureau au fond' (id: zone_bureau). 'la plaque' correspond à 'La plaque métallique nue' (id: mur_metallique). Utilise toujours l'ID exact dans l'appel d'outil.\n")
 
 	return b.String()
@@ -935,20 +954,23 @@ func (e *GameEngine) GameStateForClient() map[string]interface{} {
 		if !ok {
 			continue
 		}
-		visited := false
-		for _, h := range e.State.Player.History {
-			if strings.Contains(h, roomID) || strings.Contains(h, room.Name) {
-				visited = true
-				break
-			}
-		}
-		// Mark as visited if it's the current room
+		visited := room.Visited
 		if roomID == currentRoom {
 			visited = true
 		}
 
 		items := make([]ClientItem, 0, len(room.Items))
-		for itemID, item := range room.Items {
+		itemIDs := room.ItemOrder
+		if len(itemIDs) == 0 {
+			for id := range room.Items {
+				itemIDs = append(itemIDs, id)
+			}
+		}
+		for _, itemID := range itemIDs {
+			item, ok := room.Items[itemID]
+			if !ok {
+				continue
+			}
 			ci := ClientItem{
 				ID:        itemID,
 				Name:      item.Name,

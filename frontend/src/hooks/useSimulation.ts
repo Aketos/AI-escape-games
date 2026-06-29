@@ -22,9 +22,19 @@ export function useSimulation(): UseSimulationReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initializedRef = useRef(false);
+  const scenarioRef = useRef<string>('');
+
+  const playSfx = (sfx: string, scenario: string) => {
+    if (!sfx) return;
+    const scenarioPath = scenario ? `${scenario}/` : '';
+    const audio = new Audio(`/sounds/${scenarioPath}${sfx}.opus`);
+    audio.volume = 0.85;
+    audio.play().catch(e => console.warn(`Could not play SFX ${sfx}.opus:`, e));
+  };
 
   const sendMessage = useCallback(async (message: string, scenario: string) => {
     if (!message.trim() || loading) return;
+    scenarioRef.current = scenario;
 
     setMessages((prev) => [...prev, { role: 'user', content: message }]);
     setLoading(true);
@@ -49,6 +59,9 @@ export function useSimulation(): UseSimulationReturn {
       if (data.game_state) {
         setGameState(data.game_state as GameState);
       }
+      if (data.sfx) {
+        playSfx(data.sfx, scenario);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -61,6 +74,7 @@ export function useSimulation(): UseSimulationReturn {
   const init = useCallback(async (scenario: string) => {
     setLoading(true);
     setError(null);
+    scenarioRef.current = scenario;
     try {
       const baseUrl = import.meta.env.VITE_API_URL || '';
       const res = await fetch(`${baseUrl}/api/simulate`, {
@@ -77,6 +91,9 @@ export function useSimulation(): UseSimulationReturn {
       setMessages([{ role: 'ai', content: narration }]);
       if (data.game_state) {
         setGameState(data.game_state as GameState);
+      }
+      if (data.sfx) {
+        playSfx(data.sfx, scenario);
       }
       initializedRef.current = true;
     } catch (err) {

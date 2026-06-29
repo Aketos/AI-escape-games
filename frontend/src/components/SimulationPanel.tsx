@@ -19,6 +19,7 @@ export function SimulationPanel({
 }: SimulationPanelProps) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -26,10 +27,18 @@ export function SimulationPanel({
     }
   }, [messages, loading]);
 
+  // Keep focus in the input field after sending
+  useEffect(() => {
+    if (!loading) {
+      inputRef.current?.focus();
+    }
+  }, [loading]);
+
   const handleSend = () => {
     if (!input.trim() || loading) return;
     onSend(input.trim());
     setInput('');
+    inputRef.current?.focus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -37,6 +46,29 @@ export function SimulationPanel({
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handleItemClick = (itemName: string) => {
+    setInput(prev => {
+      const trimmed = prev.trim();
+      if (trimmed === '') {
+        return `J'examine ${itemName}`;
+      }
+      // If the input already ends with a partial command, append the item
+      return `${trimmed} ${itemName}`;
+    });
+    inputRef.current?.focus();
+  };
+
+  const handleInventoryItemClick = (itemName: string) => {
+    setInput(prev => {
+      const trimmed = prev.trim();
+      if (trimmed === '') {
+        return `J'utilise ${itemName}`;
+      }
+      return `${trimmed} ${itemName}`;
+    });
+    inputRef.current?.focus();
   };
 
   const currentRoom = gameState?.rooms.find(r => r.current);
@@ -61,12 +93,12 @@ export function SimulationPanel({
 
       {/* Rooms Panel - Left Side */}
       <div className="absolute top-8 left-8 w-72 max-h-[calc(100vh-4rem)] overflow-y-auto bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm" style={{ marginTop: '3.5rem' }}>
-        <GamePanel state={gameState} scenario={scenario} />
+        <GamePanel state={gameState} scenario={scenario} onItemClick={handleItemClick} />
       </div>
 
       {/* Inventory Panel - Right Side */}
       <div className="absolute top-8 right-8 w-64 max-h-[calc(100vh-4rem)] overflow-y-auto bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm">
-        <InventoryPanel state={gameState} scenario={scenario} />
+        <InventoryPanel state={gameState} scenario={scenario} onItemClick={handleInventoryItemClick} />
       </div>
 
       {/* Chat Panel - Center Bottom */}
@@ -124,6 +156,7 @@ export function SimulationPanel({
 
         <div className="flex gap-2 bg-black/70 border border-gray-800 p-3 rounded-b backdrop-blur-sm">
           <input
+            ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}

@@ -41,6 +41,8 @@ type LLMProxy struct {
 	httpClient        *http.Client
 	tools             []map[string]interface{}
 	config            *GameConfig
+	simHistory        []ChatMessage // conversation history for simulation mode
+	simLastSFX        string        // SFX from the last simulation tool call
 }
 
 // maxActionRounds limits LLM continuation calls within a single response.
@@ -226,21 +228,55 @@ func (p *LLMProxy) HandleSimulationChat(w http.ResponseWriter, r *http.Request) 
 		p.mu.Unlock()
 	}
 
-	// Build messages: system (persona + game state) + user message
-	messages := p.rewriteMessages([]ChatMessage{
-		{Role: "user", Content: userMsg},
+	// Reset SFX for this simulation turn
+	p.mu.Lock()
+	p.simLastSFX = ""
+	p.mu.Unlock()
+
+	// Build messages: system (persona + game state) + conversation history + new user message
+	p.mu.Lock()
+	history := p.simHistory
+	p.mu.Unlock()
+
+	// On init, clear history
+	if req.Init {
+		history = nil
+	}
+
+	conversation := append(append([]ChatMessage{}, history...), ChatMessage{
+		Role:    "user",
+		Content: userMsg,
 	})
+	messages := p.rewriteMessages(conversation)
+
+	log.Printf("SIM: userMsg=%q init=%v historyLen=%d totalMsgs=%d", userMsg, req.Init, len(history), len(messages))
+	for i, m := range messages {
+		contentPreview := m.Content
+		if len(contentPreview) > 100 {
+			contentPreview = contentPreview[:100] + "..."
+		}
+		log.Printf("SIM: msg[%d] role=%s content=%q toolCalls=%d toolCallID=%q", i, m.Role, contentPreview, len(m.ToolCalls), m.ToolCallID)
+	}
 
 	// Run the completion loop with a collecting emitter
 	var full strings.Builder
-	err := p.runCompletionLoop(r, messages, func(s string) { full.WriteString(s) })
+	updatedMessages, err := p.runCompletionLoop(r, messages, func(s string) { full.WriteString(s) })
 	narration := full.String()
+	log.Printf("SIM: rawNarration len=%d text=%q", len(narration), narration)
 	if err != nil {
 		narration = "Mes circuits de liaison neuronale subissent une interférence. Répétez, sujet."
 	}
 	// Strip any text-based tool calls that were emitted as text
 	narration = stripTextToolCalls(narration)
 	narration = strings.TrimSpace(narration)
+	log.Printf("SIM: finalNarration len=%d text=%q", len(narration), narration)
+
+	// Save conversation history (everything after the system prompt)
+	if err == nil && len(updatedMessages) > 1 {
+		p.mu.Lock()
+		p.simHistory = updatedMessages[1:] // skip system message
+		p.mu.Unlock()
+	}
 
 	// Broadcast game state change so any connected WS clients update too
 	if p.OnGameStateChange != nil {
@@ -248,9 +284,13 @@ func (p *LLMProxy) HandleSimulationChat(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	p.mu.Lock()
+	sfx := p.simLastSFX
+	p.mu.Unlock()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"narration":  narration,
 		"game_state": p.Engine.GameStateForClient(),
+		"sfx":        sfx,
 	})
 }
 
@@ -355,8 +395,13 @@ func (p *LLMProxy) executeToolCall(name, argumentsJSON string) string {
 	})
 	log.Printf("LLM proxy executed tool %s(%s) => %s (sfx=%q)", name, argumentsJSON, resultJSON, sfx)
 
-	if sfx != "" && p.OnSFX != nil {
-		p.OnSFX(sfx)
+	if sfx != "" {
+		if p.OnSFX != nil {
+			p.OnSFX(sfx)
+		}
+		p.mu.Lock()
+		p.simLastSFX = sfx
+		p.mu.Unlock()
 	}
 	if p.OnGameStateChange != nil {
 		p.OnGameStateChange()
@@ -427,7 +472,7 @@ func (p *LLMProxy) streamCompletion(w http.ResponseWriter, r *http.Request, mess
 	}
 
 	emit := func(s string) { emitter.emitContent(s) }
-	if err := p.runCompletionLoop(r, messages, emit); err != nil {
+	if _, err := p.runCompletionLoop(r, messages, emit); err != nil {
 		log.Printf("LLM proxy error: %v", err)
 		// Make CHRONOS audibly fail in-character rather than going silent.
 		emit("Mes circuits de liaison neuronale subissent une interférence. Répétez, sujet.")
@@ -439,7 +484,7 @@ func (p *LLMProxy) streamCompletion(w http.ResponseWriter, r *http.Request, mess
 // part of the OpenAI API surface).
 func (p *LLMProxy) blockingCompletion(w http.ResponseWriter, r *http.Request, messages []ChatMessage) {
 	var full strings.Builder
-	err := p.runCompletionLoop(r, messages, func(s string) { full.WriteString(s) })
+	_, err := p.runCompletionLoop(r, messages, func(s string) { full.WriteString(s) })
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusBadGateway)
 		return
@@ -462,21 +507,45 @@ func (p *LLMProxy) blockingCompletion(w http.ResponseWriter, r *http.Request, me
 	})
 }
 
-// textToolCallRe matches patterns like: go_to, {"target_room": "corridor_a"}
-// or inspect_item({"target_item": "zone_bureau"}) at end of LLM output.
-var textToolCallRe = regexp.MustCompile(`(?i)(go_to|inspect_item|take_item|use_item|input_pin_code)\s*[,\(]\s*(\{[^}]+\})`)
+// toolNames is the set of valid tool names for quick lookup.
+var toolNames = map[string]bool{
+	"go_to": true, "inspect_item": true, "take_item": true,
+	"use_item": true, "input_pin_code": true,
+}
+
+// genericToolCallRe finds any tool name followed by parameters in any format:
+// - tool_name({...})
+// - tool_name, {...}
+// - {"name": "tool_name", "parameters": {...}}
+// - [tool_name(key=value)]
+// - tool_name(target_item=xxx)
+var genericToolCallRe = regexp.MustCompile(`(?i)(?:\{\s*"name"\s*:\s*")?(go_to|inspect_item|take_item|use_item|input_pin_code)(?:"\s*,\s*"parameters"\s*:\s*)?(?:\s*[,\(]\s*)?(\{[^}]+\}|[^\]\)\n]+)?(?:\]?\)?)?`)
+
+// kvParamRe matches key=value pairs.
+var kvParamRe = regexp.MustCompile(`(\w+)\s*=\s*"?([\w_-]+)"?`)
 
 // parseTextToolCalls detects tool calls that the LLM wrote as text instead
-// of emitting via the native tool_calls API. Returns parsed toolCallChunks.
+// of emitting via the native tool_calls API. Uses a single generic regex
+// to catch all formats: JSON, bracket, inline, key=value.
 func parseTextToolCalls(text string) []toolCallChunk {
-	matches := textToolCallRe.FindAllStringSubmatch(text, -1)
+	matches := genericToolCallRe.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
 		return nil
 	}
 	var calls []toolCallChunk
 	for i, m := range matches {
-		name := m[1]
-		args := m[2]
+		name := strings.ToLower(m[1])
+		if !toolNames[name] {
+			continue
+		}
+		rawArgs := strings.TrimSpace(m[2])
+		if rawArgs == "" {
+			continue
+		}
+		args := normalizeArgs(rawArgs)
+		if args == "" {
+			continue
+		}
 		calls = append(calls, toolCallChunk{
 			ID:   fmt.Sprintf("text_call_%d", i),
 			Type: "function",
@@ -488,31 +557,66 @@ func parseTextToolCalls(text string) []toolCallChunk {
 				Arguments: args,
 			},
 		})
-		log.Printf("parseTextToolCalls: found text tool call: %s(%s)", name, args)
+		log.Printf("parseTextToolCalls: found tool call: %s(%s)", name, args)
 	}
 	return calls
 }
 
+// normalizeArgs converts any argument format to a JSON string.
+// Handles: {"key":"value"}, key=value, key=value key2=value2.
+func normalizeArgs(raw string) string {
+	raw = strings.TrimSpace(raw)
+	// Already JSON?
+	if strings.HasPrefix(raw, "{") {
+		return raw
+	}
+	// key=value format
+	pairs := kvParamRe.FindAllStringSubmatch(raw, -1)
+	if len(pairs) == 0 {
+		return ""
+	}
+	m := make(map[string]string)
+	for _, p := range pairs {
+		m[p[1]] = p[2]
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+// Precompiled regexes for stripping text-based tool calls from narration.
+var stripJSONRe = regexp.MustCompile(`\{\s*"name"\s*:\s*"(?:go_to|inspect_item|take_item|use_item|input_pin_code)"\s*,\s*"parameters"\s*:\s*\{[^}]+\}\s*\}`)
+var stripBracketRe = regexp.MustCompile(`\[(?:go_to|inspect_item|take_item|use_item|input_pin_code)\([^\]]+\)\]`)
+var stripInlineRe = regexp.MustCompile(`(?i)(?:go_to|inspect_item|take_item|use_item|input_pin_code)\s*[,\(]\s*\{[^}]+\}\)?`)
+var stripKVRe = regexp.MustCompile(`(?i)(?:go_to|inspect_item|take_item|use_item|input_pin_code)\([^\)]+\)`)
+
 // stripTextToolCalls removes text-based tool call patterns from the narration.
 func stripTextToolCalls(text string) string {
-	return textToolCallRe.ReplaceAllString(text, "")
+	text = stripJSONRe.ReplaceAllString(text, "")
+	text = stripBracketRe.ReplaceAllString(text, "")
+	text = stripInlineRe.ReplaceAllString(text, "")
+	text = stripKVRe.ReplaceAllString(text, "")
+	return text
 }
 
 // runCompletionLoop streams upstream completions, emits narration text,
 // executes native tool calls, and requests continuations until the LLM
-// finishes naturally (no more tool calls).
-func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, emit func(string)) error {
+// finishes naturally (no more tool calls). Returns the updated messages
+// slice including any assistant and tool messages appended during the loop.
+func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, emit func(string)) ([]ChatMessage, error) {
 	for round := 0; round < maxActionRounds; round++ {
 		resp, err := p.callUpstream(messages)
 		if err != nil {
-			return err
+			return messages, err
 		}
 
 		assistantText, toolCalls, err := p.consumeUpstream(r, resp, emit)
 		resp.Body.Close()
 		if err != nil {
-			return err
+			log.Printf("runCompletionLoop: consumeUpstream error: %v", err)
+			return messages, err
 		}
+
+		log.Printf("runCompletionLoop: round=%d assistantTextLen=%d toolCalls=%d text=%q", round, len(assistantText), len(toolCalls), assistantText)
 
 		// Fallback: if the LLM didn't make proper tool calls but wrote them
 		// as text (e.g. "go_to, {"target_room": "corridor_a"}"), parse them.
@@ -521,24 +625,23 @@ func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, em
 			if len(textToolCalls) > 0 {
 				log.Printf("runCompletionLoop: detected %d text-based tool calls, executing as fallback", len(textToolCalls))
 				toolCalls = textToolCalls
-				// Strip the tool call text from the narration
-				cleaned := stripTextToolCalls(assistantText)
-				if cleaned != assistantText {
-					// We already emitted the full text; we can't un-emit it.
-					// But for simulation mode the full text is collected separately.
-				}
 			}
 		}
 
 		if len(toolCalls) == 0 {
-			return nil // finished without (further) tool calls
+			// Append the final assistant text as history (no tool calls)
+			messages = append(messages, ChatMessage{
+				Role:    "assistant",
+				Content: stripTextToolCalls(assistantText),
+			})
+			break // finished without (further) tool calls
 		}
 
 		// Append the assistant message with tool calls, then one tool role
 		// message per call with the real game engine result.
 		messages = append(messages, ChatMessage{
 			Role:      "assistant",
-			Content:   assistantText,
+			Content:   stripTextToolCalls(assistantText),
 			ToolCalls: toolCalls,
 		})
 
@@ -556,7 +659,7 @@ func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, em
 	if p.OnGameStateChange != nil {
 		p.OnGameStateChange()
 	}
-	return nil
+	return messages, nil
 }
 
 // consumeUpstream reads the upstream SSE stream, emitting narration text to

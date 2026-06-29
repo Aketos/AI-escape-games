@@ -72,6 +72,8 @@ type RoomState struct {
 	Description string               `json:"description"`
 	Image       string               `json:"image,omitempty"`
 	Items       map[string]*RoomItem `json:"items"`
+	ItemOrder   []string             `json:"-"` // item IDs in JSON declaration order
+	Visited     bool                 `json:"-"` // true once the player has been in this room
 }
 
 // GameState is the overarching Finite State Machine (FSM) holding all truth.

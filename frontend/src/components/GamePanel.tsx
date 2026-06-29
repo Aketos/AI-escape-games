@@ -7,9 +7,10 @@ import { itemImage } from '../utils/imagePath';
 interface Props {
   state: GameState | null;
   scenario?: string | null;
+  onItemClick?: (itemName: string) => void;
 }
 
-export function GamePanel({ state }: Props) {
+export function GamePanel({ state, onItemClick }: Props) {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
   if (!state) {
@@ -65,13 +66,13 @@ export function GamePanel({ state }: Props) {
 
       {/* Selected Room Detail */}
       {selectedRoom && (
-        <RoomDetail room={selectedRoom} />
+        <RoomDetail room={selectedRoom} onItemClick={onItemClick} />
       )}
     </div>
   );
 }
 
-export function InventoryPanel({ state, scenario }: Props) {
+export function InventoryPanel({ state, scenario, onItemClick }: Props) {
   if (!state) {
     return (
       <div className="text-gray-600 font-mono text-xs italic">
@@ -117,7 +118,8 @@ export function InventoryPanel({ state, scenario }: Props) {
               return (
               <div
                 key={item.id}
-                className="flex items-center gap-1.5 px-2 py-1.5 bg-[#00ffcc]/5 border border-[#00ffcc]/30 rounded font-mono text-xs text-[#00ffcc]"
+                onClick={() => onItemClick?.(item.name)}
+                className={`flex items-center gap-1.5 px-2 py-1.5 bg-[#00ffcc]/5 border border-[#00ffcc]/30 rounded font-mono text-xs text-[#00ffcc] ${onItemClick ? 'cursor-pointer hover:bg-[#00ffcc]/15 hover:border-[#00ffcc]/60 transition-all' : ''}`}
               >
                 {img ? (
                   <img src={img} alt={item.name} className="w-8 h-8 rounded object-cover flex-shrink-0" />
@@ -168,7 +170,7 @@ function RoomButton({ room, selected, onClick }: { room: GameRoom; selected: boo
   );
 }
 
-function RoomDetail({ room }: { room: GameRoom }) {
+function RoomDetail({ room, onItemClick }: { room: GameRoom; onItemClick?: (itemName: string) => void }) {
   const itemMap = new Map<string, GameItem>();
   room.items.forEach(i => itemMap.set(i.id, i));
 
@@ -205,7 +207,7 @@ function RoomDetail({ room }: { room: GameRoom }) {
       <div className="flex flex-col gap-1">
         <AnimatePresence mode="popLayout">
           {topLevel.map(item => (
-            <ItemTree key={item.id} item={item} itemMap={itemMap} depth={0} />
+            <ItemTree key={item.id} item={item} itemMap={itemMap} depth={0} onItemClick={onItemClick} />
           ))}
         </AnimatePresence>
       </div>
@@ -219,22 +221,22 @@ function RoomDetail({ room }: { room: GameRoom }) {
   );
 }
 
-function ItemTree({ item, itemMap, depth }: { item: GameItem; itemMap: Map<string, GameItem>; depth: number }) {
+function ItemTree({ item, itemMap, depth, onItemClick }: { item: GameItem; itemMap: Map<string, GameItem>; depth: number; onItemClick?: (itemName: string) => void }) {
   const children: GameItem[] = (item.contains || [])
     .map(cid => itemMap.get(cid))
     .filter((c): c is GameItem => c !== undefined && c.visible);
 
   return (
     <div className="flex flex-col gap-1">
-      <ItemRow item={item} depth={depth} />
+      <ItemRow item={item} depth={depth} onItemClick={onItemClick} />
       {children.map(child => (
-        <ItemTree key={child.id} item={child} itemMap={itemMap} depth={depth + 1} />
+        <ItemTree key={child.id} item={child} itemMap={itemMap} depth={depth + 1} onItemClick={onItemClick} />
       ))}
     </div>
   );
 }
 
-function ItemRow({ item, depth }: { item: GameItem; depth: number }) {
+function ItemRow({ item, depth, onItemClick }: { item: GameItem; depth: number; onItemClick?: (itemName: string) => void }) {
   const isZone = item.type === 'zone';
   const inspected = item.inspected;
 
@@ -248,10 +250,11 @@ function ItemRow({ item, depth }: { item: GameItem; depth: number }) {
 
   return (
     <div
+      onClick={() => onItemClick?.(item.name)}
       style={{ paddingLeft: `${0.5 + depth * 1.2}rem` }}
       className={`flex items-center gap-2 px-2 py-1.5 rounded font-mono text-xs transition-all ${baseClasses} ${
         inspected ? 'opacity-60' : 'opacity-100'
-      }`}
+      } ${onItemClick ? 'cursor-pointer hover:scale-[1.02] hover:brightness-125' : ''}`}
     >
       {inspected ? (
         <CheckCircle2 className="w-3 h-3 flex-shrink-0 text-[#00ffcc]/70" />
