@@ -93,6 +93,54 @@ func NormalizeKey(s string) string {
 	return b.String()
 }
 
+// extractWords splits a normalized string into significant words (>=3 chars).
+// Since NormalizeKey removes spaces, we can't split on whitespace. Instead we
+// look for known French room words as delimiters.
+var knownRoomWords = []string{"couloir", "secteur", "salle", "laboratoire", "morgue", "sas", "armurerie", "serre", "hydroponique", "quartiers", "equipage", "generateur", "cryogenisation", "medical", "securite"}
+
+func extractWords(normalized string) []string {
+	words := []string{}
+	lower := normalized
+	for _, kw := range knownRoomWords {
+		idx := strings.Index(lower, kw)
+		if idx >= 0 {
+			words = append(words, kw)
+			// Also grab trailing letter (e.g. "a" in "couloira")
+			end := idx + len(kw)
+			if end < len(lower) && lower[end] >= 'a' && lower[end] <= 'z' {
+				words = append(words, string(lower[end]))
+			}
+		}
+	}
+	// Also extract single letters a, b that often distinguish sectors
+	for _, c := range []string{"a", "b"} {
+		if strings.HasSuffix(normalized, c) {
+			words = append(words, c)
+		}
+	}
+	return words
+}
+
+// wordsOverlap checks if two normalized strings share at least 2 significant
+// words. Used to match "porteverslecouloira" with "couloirsecteura".
+func wordsOverlap(a, b string) bool {
+	wa := extractWords(a)
+	wb := extractWords(b)
+	if len(wa) < 1 || len(wb) < 1 {
+		return false
+	}
+	shared := 0
+	for _, x := range wa {
+		for _, y := range wb {
+			if x == y && len(x) >= 1 {
+				shared++
+				break
+			}
+		}
+	}
+	return shared >= 2
+}
+
 // minFuzzyLen avoids absurd substring matches ("le" matching half the room).
 const minFuzzyLen = 4
 
@@ -427,6 +475,32 @@ func (e *GameEngine) HandleGoTo(playerID, targetRoomID string) (response string,
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// Resolve fuzzy room reference to actual room ID
+	resolvedRoomID := ""
+	for id, room := range e.State.Rooms {
+		if id == targetRoomID || strings.EqualFold(id, targetRoomID) {
+			resolvedRoomID = id
+			break
+		}
+		// Fuzzy: check if the raw input matches the room name or ID
+		key := NormalizeKey(targetRoomID)
+		idKey := NormalizeKey(id)
+		nameKey := NormalizeKey(room.Name)
+		if key == idKey || key == nameKey {
+			resolvedRoomID = id
+			break
+		}
+		// Partial match: "couloir" matches "Couloir Secteur A"
+		if key != "" && (strings.Contains(idKey, key) || strings.Contains(nameKey, key) || strings.Contains(key, idKey)) {
+			resolvedRoomID = id
+			break
+		}
+	}
+	if resolvedRoomID == "" {
+		return fmt.Sprintf("Vous ne trouvez aucun chemin vers %s.", targetRoomID), "", nil
+	}
+	targetRoomID = resolvedRoomID
+
 	target, ok := e.State.Rooms[targetRoomID]
 	if !ok {
 		return fmt.Sprintf("Vous ne trouvez aucun chemin vers %s.", targetRoomID), "", nil
@@ -437,20 +511,21 @@ func (e *GameEngine) HandleGoTo(playerID, targetRoomID string) (response string,
 	}
 
 	// Check for a door/passage to the target room in the current room.
-	// A door is any item whose name or ID references the target room and
-	// whose state is "locked" — that blocks movement. If no door item is
-	// found, the move is allowed (rooms may be freely connected).
+	// A door is any visible item whose name references the target room
+	// and whose state is "locked" — that blocks movement.
 	currentRoom := e.State.Rooms[e.State.Player.CurrentRoom]
 	if currentRoom != nil {
-		targetName := strings.ToLower(target.Name)
-		targetID := strings.ToLower(targetRoomID)
+		itemKey := ""
+		rIDKey := NormalizeKey(targetRoomID)
+		rNameKey := NormalizeKey(target.Name)
 		for _, item := range currentRoom.Items {
 			if !item.Visible {
 				continue
 			}
-			itemName := strings.ToLower(item.Name)
+			itemKey = NormalizeKey(item.Name)
 			// Check if this item is a door to the target room
-			if strings.Contains(itemName, targetID) || strings.Contains(itemName, targetName) {
+			if strings.Contains(itemKey, rIDKey) || strings.Contains(itemKey, rNameKey) ||
+				wordsOverlap(itemKey, rIDKey) || wordsOverlap(itemKey, rNameKey) {
 				if item.State == "locked" {
 					return fmt.Sprintf("Le passage vers %s est verrouillé. %s", target.Name, item.DescriptionOnInspect), "", nil
 				}
@@ -538,6 +613,9 @@ func (e *GameEngine) HandleInputPinCode(playerID string, pinCode string) (respon
 	for _, unlockedID := range device.Unlocks {
 		if unlocked, ok := room.Items[unlockedID]; ok {
 			unlocked.Visible = true
+			if unlocked.State == "locked" {
+				unlocked.State = "unlocked"
+			}
 		}
 	}
 
@@ -654,10 +732,50 @@ func (e *GameEngine) StateSnapshot() string {
 			if item.State != "" {
 				fmt.Fprintf(&b, " [état: %s]", item.State)
 			}
+			if item.Requires != "" {
+				fmt.Fprintf(&b, " [nécessite: %s]", item.Requires)
+			}
 			if item.Inspected {
 				b.WriteString(" [déjà inspecté]")
 			}
 			b.WriteString("\n")
+		}
+	}
+
+	// List accessible rooms (doors that are visible and unlocked)
+	if room != nil {
+		var accessible []string
+		for _, item := range room.Items {
+			if !item.Visible || item.State == "locked" {
+				continue
+			}
+			// Check if this item is a door/passage by matching significant words
+			// between the door name and room names/IDs.
+			itemKey := NormalizeKey(item.Name)
+			for rID, r := range e.State.Rooms {
+				if rID == e.State.Player.CurrentRoom {
+					continue
+				}
+				rIDKey := NormalizeKey(rID)
+				rNameKey := NormalizeKey(r.Name)
+				// Direct containment (either direction)
+				if strings.Contains(itemKey, rIDKey) || strings.Contains(itemKey, rNameKey) ||
+					strings.Contains(rIDKey, itemKey) || strings.Contains(rNameKey, itemKey) {
+					accessible = append(accessible, fmt.Sprintf("%s (id: %s)", r.Name, rID))
+					break
+				}
+				// Word-level overlap: "Couloir A" vs "Couloir Secteur A" share "couloir" + "a"
+				if wordsOverlap(itemKey, rIDKey) || wordsOverlap(itemKey, rNameKey) {
+					accessible = append(accessible, fmt.Sprintf("%s (id: %s)", r.Name, rID))
+					break
+				}
+			}
+		}
+		if len(accessible) > 0 {
+			b.WriteString("Passages accessibles (utilise go_to avec l'ID) :\n")
+			for _, a := range accessible {
+				fmt.Fprintf(&b, "- %s\n", a)
+			}
 		}
 	}
 

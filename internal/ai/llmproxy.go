@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -237,6 +238,9 @@ func (p *LLMProxy) HandleSimulationChat(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		narration = "Mes circuits de liaison neuronale subissent une interférence. Répétez, sujet."
 	}
+	// Strip any text-based tool calls that were emitted as text
+	narration = stripTextToolCalls(narration)
+	narration = strings.TrimSpace(narration)
 
 	// Broadcast game state change so any connected WS clients update too
 	if p.OnGameStateChange != nil {
@@ -440,6 +444,7 @@ func (p *LLMProxy) blockingCompletion(w http.ResponseWriter, r *http.Request, me
 		http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusBadGateway)
 		return
 	}
+	content := strings.TrimSpace(stripTextToolCalls(full.String()))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -450,11 +455,47 @@ func (p *LLMProxy) blockingCompletion(w http.ResponseWriter, r *http.Request, me
 		"choices": []map[string]interface{}{
 			{
 				"index":         0,
-				"message":       map[string]string{"role": "assistant", "content": full.String()},
+				"message":       map[string]string{"role": "assistant", "content": content},
 				"finish_reason": "stop",
 			},
 		},
 	})
+}
+
+// textToolCallRe matches patterns like: go_to, {"target_room": "corridor_a"}
+// or inspect_item({"target_item": "zone_bureau"}) at end of LLM output.
+var textToolCallRe = regexp.MustCompile(`(?i)(go_to|inspect_item|take_item|use_item|input_pin_code)\s*[,\(]\s*(\{[^}]+\})`)
+
+// parseTextToolCalls detects tool calls that the LLM wrote as text instead
+// of emitting via the native tool_calls API. Returns parsed toolCallChunks.
+func parseTextToolCalls(text string) []toolCallChunk {
+	matches := textToolCallRe.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var calls []toolCallChunk
+	for i, m := range matches {
+		name := m[1]
+		args := m[2]
+		calls = append(calls, toolCallChunk{
+			ID:   fmt.Sprintf("text_call_%d", i),
+			Type: "function",
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{
+				Name:      name,
+				Arguments: args,
+			},
+		})
+		log.Printf("parseTextToolCalls: found text tool call: %s(%s)", name, args)
+	}
+	return calls
+}
+
+// stripTextToolCalls removes text-based tool call patterns from the narration.
+func stripTextToolCalls(text string) string {
+	return textToolCallRe.ReplaceAllString(text, "")
 }
 
 // runCompletionLoop streams upstream completions, emits narration text,
@@ -471,6 +512,22 @@ func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, em
 		resp.Body.Close()
 		if err != nil {
 			return err
+		}
+
+		// Fallback: if the LLM didn't make proper tool calls but wrote them
+		// as text (e.g. "go_to, {"target_room": "corridor_a"}"), parse them.
+		if len(toolCalls) == 0 && assistantText != "" {
+			textToolCalls := parseTextToolCalls(assistantText)
+			if len(textToolCalls) > 0 {
+				log.Printf("runCompletionLoop: detected %d text-based tool calls, executing as fallback", len(textToolCalls))
+				toolCalls = textToolCalls
+				// Strip the tool call text from the narration
+				cleaned := stripTextToolCalls(assistantText)
+				if cleaned != assistantText {
+					// We already emitted the full text; we can't un-emit it.
+					// But for simulation mode the full text is collected separately.
+				}
+			}
 		}
 
 		if len(toolCalls) == 0 {
