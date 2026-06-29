@@ -395,6 +395,9 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 	for _, unlockedID := range targetItem.Unlocks {
 		if unlocked, ok := room.Items[unlockedID]; ok {
 			unlocked.Visible = true
+			if unlocked.State == "locked" {
+				unlocked.State = "unlocked"
+			}
 		}
 	}
 
@@ -418,6 +421,8 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 }
 
 // HandleGoTo processes a go_to action, moving the player to a different room.
+// The move is allowed only if a door or passage to the target room exists in
+// the current room and is unlocked (state != "locked").
 func (e *GameEngine) HandleGoTo(playerID, targetRoomID string) (response string, sfx string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -429,6 +434,28 @@ func (e *GameEngine) HandleGoTo(playerID, targetRoomID string) (response string,
 
 	if e.State.Player.CurrentRoom == targetRoomID {
 		return "Vous êtes déjà dans cette pièce.", "", nil
+	}
+
+	// Check for a door/passage to the target room in the current room.
+	// A door is any item whose name or ID references the target room and
+	// whose state is "locked" — that blocks movement. If no door item is
+	// found, the move is allowed (rooms may be freely connected).
+	currentRoom := e.State.Rooms[e.State.Player.CurrentRoom]
+	if currentRoom != nil {
+		targetName := strings.ToLower(target.Name)
+		targetID := strings.ToLower(targetRoomID)
+		for _, item := range currentRoom.Items {
+			if !item.Visible {
+				continue
+			}
+			itemName := strings.ToLower(item.Name)
+			// Check if this item is a door to the target room
+			if strings.Contains(itemName, targetID) || strings.Contains(itemName, targetName) {
+				if item.State == "locked" {
+					return fmt.Sprintf("Le passage vers %s est verrouillé. %s", target.Name, item.DescriptionOnInspect), "", nil
+				}
+			}
+		}
 	}
 
 	e.State.Player.CurrentRoom = targetRoomID
@@ -654,6 +681,7 @@ func (e *GameEngine) StateSnapshot() string {
 	}
 
 	b.WriteString("\nRAPPEL : Pour toute action du joueur (inspecter, prendre, utiliser), tu DOIS appeler l'outil correspondant. Ne raconte JAMAIS le résultat d'une action sans l'avoir exécutée via l'outil.\n")
+	b.WriteString("MATCHING : Le joueur peut désigner un objet par une description partielle. Fais correspondre ses mots au NOM de l'objet (pas à l'ID). Ex: 'le bureau' correspond à 'Le bureau au fond' (id: zone_bureau). 'la plaque' correspond à 'La plaque métallique nue' (id: mur_metallique). Utilise toujours l'ID exact dans l'appel d'outil.\n")
 
 	return b.String()
 }
@@ -775,7 +803,20 @@ func (e *GameEngine) GameStateForClient() map[string]interface{} {
 	rooms := make([]ClientRoom, 0, len(e.State.Rooms))
 	currentRoom := e.State.Player.CurrentRoom
 
-	for roomID, room := range e.State.Rooms {
+	// Iterate in JSON declaration order (RoomOrder) for stable frontend display.
+	roomIDs := e.State.RoomOrder
+	if len(roomIDs) == 0 {
+		// Fallback for states loaded before RoomOrder existed
+		for id := range e.State.Rooms {
+			roomIDs = append(roomIDs, id)
+		}
+	}
+
+	for _, roomID := range roomIDs {
+		room, ok := e.State.Rooms[roomID]
+		if !ok {
+			continue
+		}
 		visited := false
 		for _, h := range e.State.Player.History {
 			if strings.Contains(h, roomID) || strings.Contains(h, room.Name) {

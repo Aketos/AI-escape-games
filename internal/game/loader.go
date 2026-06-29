@@ -33,6 +33,7 @@ func LoadScenario(roomPath, playerPath string) (*GameState, error) {
 	if err := json.Unmarshal(roomData, &rooms); err == nil {
 		for i := range rooms {
 			gameState.Rooms[rooms[i].RoomID] = &rooms[i]
+			gameState.RoomOrder = append(gameState.RoomOrder, rooms[i].RoomID)
 		}
 		return gameState, nil
 	}
@@ -43,6 +44,7 @@ func LoadScenario(roomPath, playerPath string) (*GameState, error) {
 		return nil, fmt.Errorf("failed to unmarshal room state: %w", err)
 	}
 	gameState.Rooms[room.RoomID] = &room
+	gameState.RoomOrder = []string{room.RoomID}
 
 	return gameState, nil
 }

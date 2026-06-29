@@ -60,7 +60,7 @@
       },
       "mur_metallique": {
         "name": "La plaque métallique nue",
-        "visible": true,
+        "visible": false,
         "is_collectible": false,
         "state": "dirty",
         "requires": "fiole_uv",

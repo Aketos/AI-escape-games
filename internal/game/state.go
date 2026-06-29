@@ -77,9 +77,10 @@ type RoomState struct {
 // GameState is the overarching Finite State Machine (FSM) holding all truth.
 // Modifications to this should be protected by a mutex if accessed concurrently.
 type GameState struct {
-	Player PlayerState
-	Rooms  map[string]*RoomState
-	Won    bool
+	Player    PlayerState
+	Rooms     map[string]*RoomState
+	RoomOrder []string // room IDs in JSON declaration order
+	Won       bool
 }
 
 // NewGameState initializes a blank game state.

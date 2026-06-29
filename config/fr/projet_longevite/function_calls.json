@@ -2,13 +2,13 @@
   "tools": [
     {
       "name": "inspect_item",
-      "description": "OBLIGATOIRE quand le joueur veut examiner, regarder, fouiller, inspecter ou décrire un objet spécifique de la pièce. Tu ne dois JAMAIS décrire toi-même un objet - appelle toujours cette fonction d'abord.",
+      "description": "OBLIGATOIRE quand le joueur veut examiner, regarder, fouiller, inspecter ou décrire un objet spécifique de la pièce. Tu ne dois JAMAIS décrire toi-même un objet - appelle toujours cette fonction d'abord. Tu dois faire correspondre la description du joueur (même partielle, ex: 'le bureau' correspond à 'Le bureau au fond') à l'ID de l'objet le plus pertinent dans la pièce actuelle.",
       "parameters": {
         "type": "object",
         "properties": {
           "target_item": {
             "type": "string",
-            "description": "L'ID exact de l'objet dans la pièce (ex: 'blouse_scientifique', 'mur_metallique')."
+            "description": "L'ID de l'objet dans la pièce (ex: 'zone_bureau', 'blouse_scientifique', 'mur_metallique'). Choisis l'objet dont le nom correspond le mieux à ce que le joueur a dit, même si la formulation est différente."
           }
         },
         "required": ["target_item"]
@@ -16,13 +16,13 @@
     },
     {
       "name": "take_item",
-      "description": "OBLIGATOIRE quand le joueur dit qu'il veut prendre, ramasser, récupérer ou garder un objet. Tu ne dois JAMAIS donner l'objet directement - appelle toujours cette fonction.",
+      "description": "OBLIGATOIRE quand le joueur dit qu'il veut prendre, ramasser, récupérer ou garder un objet. Tu ne dois JAMAIS donner l'objet directement - appelle toujours cette fonction. Fais correspondre la description du joueur à l'ID de l'objet le plus pertinent, même si la formulation est partielle.",
       "parameters": {
         "type": "object",
         "properties": {
           "target_item": {
             "type": "string",
-            "description": "L'ID de l'objet à prendre (ex: 'fiole_uv')."
+            "description": "L'ID de l'objet à prendre (ex: 'fiole_uv'). Choisis l'objet dont le nom correspond le mieux à ce que le joueur a dit."
           }
         },
         "required": ["target_item"]
@@ -30,20 +30,34 @@
     },
     {
       "name": "use_item",
-      "description": "OBLIGATOIRE quand le joueur veut utiliser, appliquer ou combiner un objet de son inventaire sur un objet de la pièce. Appelle toujours cette fonction au lieu de décrire le résultat.",
+      "description": "OBLIGATOIRE quand le joueur veut utiliser, appliquer ou combiner un objet de son inventaire sur un objet de la pièce. Appelle toujours cette fonction au lieu de décrire le résultat. Fais correspondre la description du joueur à l'ID de l'objet le plus pertinent, même si la formulation est partielle.",
       "parameters": {
         "type": "object",
         "properties": {
           "inventory_item": {
             "type": "string",
-            "description": "L'ID de l'objet tenu par le joueur (ex: 'fiole_uv')."
+            "description": "L'ID de l'objet tenu par le joueur (ex: 'fiole_uv'). Choisis l'objet de l'inventaire dont le nom correspond le mieux."
           },
           "target_item": {
             "type": "string",
-            "description": "L'ID de l'objet cible dans la pièce (ex: 'mur_metallique')."
+            "description": "L'ID de l'objet cible dans la pièce (ex: 'mur_metallique'). Choisis l'objet dont le nom correspond le mieux à ce que le joueur a dit."
           }
         },
         "required": ["inventory_item", "target_item"]
+      }
+    },
+    {
+      "name": "go_to",
+      "description": "OBLIGATOIRE quand le joueur veut se déplacer, aller, passer vers une autre pièce ou zone. Appelle cette fonction avec l'ID de la salle de destination. Le déplacement n'est possible que si un passage est déverrouillé.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_room": {
+            "type": "string",
+            "description": "L'ID de la salle de destination (ex: 'corridor_a', 'medical_lab'). Fais correspondre la description du joueur au nom de la salle la plus pertinente."
+          }
+        },
+        "required": ["target_room"]
       }
     },
     {
