@@ -53,6 +53,7 @@ function App() {
     if (simulationMode) {
       sim.reset();
       setSimActive(true);
+      sim.init(selectedScenario);
       return;
     }
     clearState();

@@ -2,7 +2,7 @@
   {
     "room_id": "cryo_room",
     "name": "Salle de Cryogénisation",
-    "image": "cryo_room.jpg",
+    "image": "cryo_room.png",
     "items": {
       "zone_sol": {
         "name": "Le sol près du caisson",
@@ -176,7 +176,7 @@
     "room_id": "corridor_a",
     "name": "Couloir Secteur A",
     "description": "Un carrefour de transit plongé dans une lueur stroboscopique terrifiante. Les murs sont marqués par ce qui ressemble à des tirs de plasma.",
-    "image": "corridor_a.jpg",
+    "image": "corridor_a.png",
     "items": {
       "zone_cadavre": {
         "name": "Masse informe au centre du couloir",
@@ -227,7 +227,7 @@
     "room_id": "medical_lab",
     "name": "Laboratoire Médical",
     "description": "L'odeur de produits chimiques et de chair en décomposition est suffocante. Des dizaines de tubes à essai sont fracassés au sol.",
-    "image": "medical_lab.jpg",
+    "image": "medical_lab.png",
     "items": {
       "zone_paillasse": {
         "name": "Les paillasses de recherche",
@@ -295,7 +295,7 @@
     "room_id": "morgue",
     "name": "La Morgue",
     "description": "L'acoustique de cette pièce est morte. Des rangées de tiroirs mortuaires en inox tapissent les murs, sous une lumière noire grésillante.",
-    "image": "morgue.jpg",
+    "image": "morgue.png",
     "items": {
       "zone_casiers": {
         "name": "La paroi des tiroirs mortuaires",
@@ -326,7 +326,7 @@
     "room_id": "security_airlock",
     "name": "Sas de Sécurité",
     "description": "Une petite pièce étanche. À peine entré, les portes se scellent et un gaz jaunâtre commence à être pulvérisé depuis le plafond. CHRONOS observe vos constantes chuter.",
-    "image": "security_airlock.jpg",
+    "image": "security_airlock.png",
     "items": {
       "zone_ventilation_sas": {
         "name": "La grande grille d'aération au plafond",
@@ -350,7 +350,7 @@
     "room_id": "corridor_b",
     "name": "Couloir Secteur B",
     "description": "Ce secteur est complètement ravagé. La fumée rampe sur le sol métallique. Au fond se dresse la gigantesque porte de la salle du générateur.",
-    "image": "corridor_b.jpg",
+    "image": "corridor_b.png",
     "items": {
       "zone_accès_corridor_b": {
         "name": "Les nombreuses portes du secteur",
@@ -374,7 +374,7 @@
     "room_id": "armory",
     "name": "L'Armurerie",
     "description": "Les râteliers d'armes ont été vidés, témoignant d'une défense désespérée. Il reste des douilles partout.",
-    "image": "armory.jpg",
+    "image": "armory.png",
     "items": {
       "zone_armoires": {
         "name": "Les casiers de maintenance tactique",
@@ -403,7 +403,7 @@
     "room_id": "hydroponics",
     "name": "Serre Hydroponique",
     "description": "L'endroit est plongé dans les ténèbres absolues et sent la terre pourrie. L'humidité y est écrasante.",
-    "image": "hydroponics.jpg",
+    "image": "hydroponics.png",
     "items": {
       "zone_vegetation": {
         "name": "La masse végétale dans l'obscurité",
@@ -434,7 +434,7 @@
     "room_id": "crew_quarters",
     "name": "Quartiers de l'équipage",
     "description": "Un dortoir exigu. Les lits superposés sont renversés, les affaires personnelles éparpillées. Un silence tragique règne ici.",
-    "image": "crew_quarters.jpg",
+    "image": "crew_quarters.png",
     "items": {
       "zone_casiers_perso": {
         "name": "L'alignement de casiers personnels",
@@ -465,7 +465,7 @@
     "room_id": "generator_room",
     "name": "Salle des Générateurs",
     "description": "Une caverne colossale d'ingénierie. Un compte à rebours numérique géant égrène les dernières minutes d'oxygène. C'est ici que tout se joue.",
-    "image": "generator_room.jpg",
+    "image": "generator_room.png",
     "items": {
       "zone_console_centrale": {
         "name": "Le pilier de commande central",

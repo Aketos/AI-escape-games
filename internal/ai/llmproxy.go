@@ -159,6 +159,10 @@ func (p *LLMProxy) HandleModels(w http.ResponseWriter, r *http.Request) {
 // user message, builds a full conversation with persona + game state, calls
 // the upstream LLM (non-streaming), executes any tool calls, and returns the
 // narration + updated game state as JSON. This bypasses Unmute entirely.
+//
+// When init=true (or message is empty), it reloads the scenario game state
+// and uses the intro_prompt as the first user message to trigger the
+// cinematic introduction from CHRONOS.
 func (p *LLMProxy) HandleSimulationChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error": "method not allowed"}`, http.StatusMethodNotAllowed)
@@ -168,31 +172,62 @@ func (p *LLMProxy) HandleSimulationChat(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Message  string `json:"message"`
 		Scenario string `json:"scenario"`
+		Init     bool   `json:"init"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "bad request: %v"}`, err), http.StatusBadRequest)
 		return
 	}
 
-	// Reload scenario if different from current
+	// Reload scenario (config + game state) if different from current or if init
+	p.mu.Lock()
+	currentDir := p.config.ScenarioDir
+	p.mu.Unlock()
+
+	needReload := req.Init
 	if req.Scenario != "" {
-		p.mu.Lock()
-		current := p.config.ScenarioDir
-		p.mu.Unlock()
-		expectedDir := filepath.Join(filepath.Dir(current), req.Scenario)
-		if current != expectedDir {
-			cfg, err := LoadGameConfig(req.Scenario)
-			if err != nil {
-				http.Error(w, fmt.Sprintf(`{"error": "failed to load scenario: %v"}`, err), http.StatusBadRequest)
-				return
-			}
-			p.UpdateConfig(cfg)
+		expectedDir := filepath.Join(filepath.Dir(currentDir), req.Scenario)
+		if currentDir != expectedDir {
+			needReload = true
 		}
+	}
+
+	if needReload {
+		scenarioName := req.Scenario
+		if scenarioName == "" {
+			scenarioName = filepath.Base(currentDir)
+		}
+		cfg, err := LoadGameConfig(scenarioName)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "failed to load scenario: %v"}`, err), http.StatusBadRequest)
+			return
+		}
+		gameFSM, err := game.LoadScenario(
+			filepath.Join(cfg.ScenarioDir, "room_state.json"),
+			filepath.Join(cfg.ScenarioDir, "player_state.json"),
+		)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "failed to load game state: %v"}`, err), http.StatusBadRequest)
+			return
+		}
+		p.mu.Lock()
+		p.config = cfg
+		p.tools = loadTools(cfg.ScenarioDir)
+		p.mu.Unlock()
+		p.Engine.ReloadState(gameFSM)
+	}
+
+	// Determine the user message: use intro_prompt on init/empty, else the message
+	userMsg := req.Message
+	if userMsg == "" || req.Init {
+		p.mu.Lock()
+		userMsg = p.config.IntroPrompt
+		p.mu.Unlock()
 	}
 
 	// Build messages: system (persona + game state) + user message
 	messages := p.rewriteMessages([]ChatMessage{
-		{Role: "user", Content: req.Message},
+		{Role: "user", Content: userMsg},
 	})
 
 	// Run the completion loop with a collecting emitter
