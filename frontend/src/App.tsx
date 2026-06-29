@@ -4,6 +4,7 @@ import { useGameState } from './hooks/useGameState';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { GamePanel, InventoryPanel } from './components/GamePanel';
 import { Mic, Terminal, Loader2, Map, ChevronUp, ChevronDown } from 'lucide-react';
+import { roomImage } from './utils/imagePath';
 
 interface Scenario {
   id: string;
@@ -50,8 +51,18 @@ function App() {
 
   const showScenarioPicker = (status === 'Idle' || status === 'Disconnected') && !scenariosLoading;
 
+  const currentRoom = gameState?.rooms.find(r => r.current);
+  const bgImage = roomImage(selectedScenario, currentRoom?.image);
+
   return (
     <div className="min-h-screen relative flex flex-col items-center justify-center">
+      {/* Room background image */}
+      {bgImage && (
+        <div
+          className="absolute inset-0 z-0 bg-cover bg-center transition-all duration-1000"
+          style={{ backgroundImage: `url(${bgImage})` }}
+        />
+      )}
       <div className="scanlines"></div>
 
       {/* Header */}
@@ -62,12 +73,12 @@ function App() {
 
       {/* Rooms Panel - Left Side */}
       <div className="absolute top-8 left-8 w-72 max-h-[calc(100vh-4rem)] overflow-y-auto bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm" style={{ marginTop: '3.5rem' }}>
-        <GamePanel state={gameState} />
+        <GamePanel state={gameState} scenario={selectedScenario} />
       </div>
 
       {/* Inventory Panel - Right Side */}
       <div className="absolute top-8 right-8 w-64 max-h-[calc(100vh-4rem)] overflow-y-auto bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm">
-        <InventoryPanel state={gameState} />
+        <InventoryPanel state={gameState} scenario={selectedScenario} />
       </div>
 
       {/* Main Visualizer */}

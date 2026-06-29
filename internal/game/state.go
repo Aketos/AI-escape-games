@@ -29,6 +29,7 @@ type InventoryItem struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	State string `json:"state,omitempty"`
+	Image string `json:"image,omitempty"`
 }
 
 // PlayerState represents the truth about the player.
@@ -42,6 +43,7 @@ type PlayerState struct {
 // RoomItem represents an interactive object or feature within a room.
 type RoomItem struct {
 	Name                 string   `json:"name"`
+	Image                string   `json:"image,omitempty"`
 	Visible              bool     `json:"visible"`
 	Inspected            bool     `json:"inspected,omitempty"`
 	DescriptionOnInspect string   `json:"description_on_inspect,omitempty"`
@@ -58,15 +60,17 @@ type RoomItem struct {
 	PinSuccessState      string   `json:"pin_success_state,omitempty"`
 	PinSuccessMessage    string   `json:"pin_success_message,omitempty"`
 	Produces             []string `json:"produces,omitempty"`
+	Unlocks              []string `json:"unlocks,omitempty"`
 	WinsGame             bool     `json:"wins_game,omitempty"`
 	Type                 string   `json:"type"`
 }
 
 // RoomState defines a physical location in the game and its interactive state.
 type RoomState struct {
-	RoomID      string              `json:"room_id"`
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
+	RoomID      string               `json:"room_id"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Image       string               `json:"image,omitempty"`
 	Items       map[string]*RoomItem `json:"items"`
 }
 

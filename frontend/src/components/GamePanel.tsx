@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Backpack, Eye, Search, ChevronRight, Package, Clock, Trophy, CheckCircle2 } from 'lucide-react';
 import type { GameState, GameRoom, GameItem } from '../hooks/useGameState';
+import { itemImage } from '../utils/imagePath';
 
 interface Props {
   state: GameState | null;
+  scenario?: string | null;
 }
 
 export function GamePanel({ state }: Props) {
@@ -69,7 +71,7 @@ export function GamePanel({ state }: Props) {
   );
 }
 
-export function InventoryPanel({ state }: Props) {
+export function InventoryPanel({ state, scenario }: Props) {
   if (!state) {
     return (
       <div className="text-gray-600 font-mono text-xs italic">
@@ -110,18 +112,25 @@ export function InventoryPanel({ state }: Props) {
           <div className="text-gray-600 font-mono text-xs italic">Empty</div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {state.inventory.map(item => (
+            {state.inventory.map(item => {
+              const img = itemImage(scenario ?? null, item.image);
+              return (
               <div
                 key={item.id}
                 className="flex items-center gap-1.5 px-2 py-1.5 bg-[#00ffcc]/5 border border-[#00ffcc]/30 rounded font-mono text-xs text-[#00ffcc]"
               >
-                <Package className="w-3 h-3" />
+                {img ? (
+                  <img src={img} alt={item.name} className="w-8 h-8 rounded object-cover flex-shrink-0" />
+                ) : (
+                  <Package className="w-3 h-3" />
+                )}
                 {item.name}
                 {item.state && (
                   <span className="ml-auto text-[10px] text-yellow-500/70 uppercase">{item.state}</span>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

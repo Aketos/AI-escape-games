@@ -3,6 +3,7 @@ import { useState, useCallback } from 'react';
 export interface GameItem {
   id: string;
   name: string;
+  image?: string;
   type: string;
   visible: boolean;
   inspected: boolean;
@@ -14,6 +15,7 @@ export interface GameRoom {
   id: string;
   name: string;
   description: string;
+  image?: string;
   current: boolean;
   visited: boolean;
   items: GameItem[];
@@ -23,6 +25,7 @@ export interface InventoryItem {
   id: string;
   name: string;
   state?: string;
+  image?: string;
 }
 
 export interface GameState {

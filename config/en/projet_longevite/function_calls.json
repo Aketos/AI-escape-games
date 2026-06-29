@@ -47,6 +47,20 @@
       }
     },
     {
+      "name": "go_to",
+      "description": "OBLIGATOIRE quand le joueur veut se déplacer, changer de pièce, franchir une porte ou retourner dans une zone précédente. Appelle cette fonction avec l'ID de la destination au lieu de décrire l'action.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_room": {
+            "type": "string",
+            "description": "L'ID de la salle ou du couloir de destination (ex: 'corridor_a', 'medical_lab'). Doit être une destination logique accessible depuis la salle actuelle."
+          }
+        },
+        "required": ["target_room"]
+      }
+    },
+    {
       "name": "input_pin_code",
       "description": "OBLIGATOIRE quand l'encodeur de cartes attend un code et que le joueur prononce des chiffres. Appelle cette fonction avec le code à 4 chiffres.",
       "parameters": {

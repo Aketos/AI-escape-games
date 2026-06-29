@@ -22,18 +22,26 @@ func LoadScenario(roomPath, playerPath string) (*GameState, error) {
 	}
 	gameState.Player = player
 
-	// 2. Load Room State
+	// 2. Load Room State — supports both a single room object and an array of rooms
 	roomData, err := os.ReadFile(roomPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read room state file: %w", err)
 	}
 
+	// Try array format first
+	var rooms []RoomState
+	if err := json.Unmarshal(roomData, &rooms); err == nil {
+		for i := range rooms {
+			gameState.Rooms[rooms[i].RoomID] = &rooms[i]
+		}
+		return gameState, nil
+	}
+
+	// Fallback: single room object
 	var room RoomState
 	if err := json.Unmarshal(roomData, &room); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal room state: %w", err)
 	}
-	
-	// Add the room to the game state map
 	gameState.Rooms[room.RoomID] = &room
 
 	return gameState, nil

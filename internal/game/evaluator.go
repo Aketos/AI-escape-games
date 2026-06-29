@@ -336,6 +336,7 @@ func (e *GameEngine) HandleTakeItem(playerID, itemID string) (response string, s
 		ID:    resolvedID,
 		Name:  item.Name,
 		State: item.State,
+		Image: item.Image,
 	})
 	delete(room.Items, resolvedID)
 	log.Printf("HandleTakeItem: inventory now has %d items", len(e.State.Player.Inventory))
@@ -390,6 +391,13 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 	// Reveal anything the action uncovers (e.g. a key freed from the ice).
 	revealContents(room, targetItem)
 
+	// Reveal any items unlocked by this action (e.g. a door becomes visible).
+	for _, unlockedID := range targetItem.Unlocks {
+		if unlocked, ok := room.Items[unlockedID]; ok {
+			unlocked.Visible = true
+		}
+	}
+
 	// Consume the inventory item if the target uses it up (e.g. blank card
 	// swallowed by the encoder).
 	if targetItem.ConsumesItem {
@@ -407,6 +415,32 @@ func (e *GameEngine) HandleUseItem(playerID, inventoryItemID, targetItemID strin
 		return targetItem.SuccessMessage, targetItem.SuccessSFX, nil
 	}
 	return "Cela a fonctionné.", targetItem.SuccessSFX, nil
+}
+
+// HandleGoTo processes a go_to action, moving the player to a different room.
+func (e *GameEngine) HandleGoTo(playerID, targetRoomID string) (response string, sfx string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	target, ok := e.State.Rooms[targetRoomID]
+	if !ok {
+		return fmt.Sprintf("Vous ne trouvez aucun chemin vers %s.", targetRoomID), "", nil
+	}
+
+	if e.State.Player.CurrentRoom == targetRoomID {
+		return "Vous êtes déjà dans cette pièce.", "", nil
+	}
+
+	e.State.Player.CurrentRoom = targetRoomID
+	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("S'est déplacé vers : %s", target.Name))
+
+	log.Printf("HandleGoTo: player moved to %q (%s)", targetRoomID, target.Name)
+
+	resp := fmt.Sprintf("Vous entrez dans %s.", target.Name)
+	if target.Description != "" {
+		resp += " " + target.Description
+	}
+	return resp, "sfx_door_open", nil
 }
 
 // HandleInputPinCode processes an input_pin_code action. The device is found
@@ -457,17 +491,27 @@ func (e *GameEngine) HandleInputPinCode(playerID string, pinCode string) (respon
 	for _, producedID := range device.Produces {
 		name := producedID
 		state := ""
+		image := ""
 		if produced, ok := room.Items[producedID]; ok {
 			name = produced.Name
 			state = produced.State
+			image = produced.Image
 			delete(room.Items, producedID)
 		}
 		e.State.Player.Inventory = append(e.State.Player.Inventory, InventoryItem{
 			ID:    producedID,
 			Name:  name,
 			State: state,
+			Image: image,
 		})
 		producedNames = append(producedNames, name)
+	}
+
+	// Reveal any items unlocked by this action (e.g. a door becomes visible).
+	for _, unlockedID := range device.Unlocks {
+		if unlocked, ok := room.Items[unlockedID]; ok {
+			unlocked.Visible = true
+		}
 	}
 
 	e.State.Player.History = append(e.State.Player.History, fmt.Sprintf("A entré le bon code PIN sur %s.", device.Name))
@@ -663,6 +707,14 @@ func (e *GameEngine) ProcessLLMFunctionCall(call FunctionCall) (string, string) 
 		pinCode, _ := pinObj.(string)
 		response, sfx, err = e.HandleInputPinCode(playerID, pinCode)
 
+	case "go_to":
+		targetObj, ok := call.Arguments["target_room"]
+		if !ok {
+			return `{"error": "Missing target_room parameter"}`, ""
+		}
+		targetRoom, _ := targetObj.(string)
+		response, sfx, err = e.HandleGoTo(playerID, targetRoom)
+
 	default:
 		return fmt.Sprintf(`{"error": "Unknown function: %s"}`, call.Name), ""
 	}
@@ -688,6 +740,7 @@ type ClientRoom struct {
 	ID          string       `json:"id"`
 	Name        string       `json:"name"`
 	Description string       `json:"description"`
+	Image       string       `json:"image,omitempty"`
 	Current     bool         `json:"current"`
 	Visited     bool         `json:"visited"`
 	Items       []ClientItem `json:"items"`
@@ -697,6 +750,7 @@ type ClientRoom struct {
 type ClientItem struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
+	Image     string   `json:"image,omitempty"`
 	Type      string   `json:"type"`
 	Visible   bool     `json:"visible"`
 	Inspected bool     `json:"inspected"`
@@ -709,6 +763,7 @@ type ClientInventoryItem struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	State string `json:"state,omitempty"`
+	Image string `json:"image,omitempty"`
 }
 
 // GameStateForClient returns a JSON-serializable snapshot of the game state
@@ -738,6 +793,7 @@ func (e *GameEngine) GameStateForClient() map[string]interface{} {
 			ci := ClientItem{
 				ID:        itemID,
 				Name:      item.Name,
+				Image:     item.Image,
 				Type:      item.Type,
 				Visible:   item.Visible,
 				Inspected: item.Inspected,
@@ -753,6 +809,7 @@ func (e *GameEngine) GameStateForClient() map[string]interface{} {
 			ID:          roomID,
 			Name:        room.Name,
 			Description: room.Description,
+			Image:       room.Image,
 			Current:     roomID == currentRoom,
 			Visited:     visited,
 			Items:       items,
@@ -765,6 +822,7 @@ func (e *GameEngine) GameStateForClient() map[string]interface{} {
 			ID:    item.ID,
 			Name:  item.Name,
 			State: item.State,
+			Image: item.Image,
 		})
 	}
 
