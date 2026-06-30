@@ -8,9 +8,10 @@ interface Props {
   state: GameState | null;
   scenario?: string | null;
   onItemClick?: (itemName: string) => void;
+  onRoomClick?: (roomName: string) => void;
 }
 
-export function GamePanel({ state, onItemClick }: Props) {
+export function GamePanel({ state, onItemClick, onRoomClick }: Props) {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
   if (!state) {
@@ -59,6 +60,7 @@ export function GamePanel({ state, onItemClick }: Props) {
               room={room}
               selected={selectedRoom?.id === room.id}
               onClick={() => setSelectedRoomId(room.id)}
+              onRoomClick={onRoomClick}
             />
           ))}
         </div>
@@ -140,7 +142,7 @@ export function InventoryPanel({ state, scenario, onItemClick }: Props) {
   );
 }
 
-function RoomButton({ room, selected, onClick }: { room: GameRoom; selected: boolean; onClick: () => void }) {
+function RoomButton({ room, selected, onClick, onRoomClick }: { room: GameRoom; selected: boolean; onClick: () => void; onRoomClick?: (roomName: string) => void }) {
   if (!room.visited) {
     return (
       <div className="flex items-center gap-2 px-3 py-2 border border-gray-800/50 rounded font-mono text-xs text-gray-700 italic">
@@ -150,9 +152,16 @@ function RoomButton({ room, selected, onClick }: { room: GameRoom; selected: boo
     );
   }
 
+  const handleClick = () => {
+    onClick();
+    if (onRoomClick && !room.current) {
+      onRoomClick(room.name);
+    }
+  };
+
   return (
     <button
-      onClick={onClick}
+      onClick={handleClick}
       className={`flex items-center gap-2 px-3 py-2 border rounded font-mono text-xs tracking-wide transition-all duration-200 ${
         selected
           ? 'border-[#00ffcc] text-[#00ffcc] bg-[#00ffcc]/5 shadow-[0_0_10px_rgba(0,255,204,0.2)]'

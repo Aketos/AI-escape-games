@@ -71,6 +71,12 @@ export function SimulationPanel({
     inputRef.current?.focus();
   };
 
+  const handleRoomClick = (roomName: string) => {
+    const cmd = `Je vais dans ${roomName}`;
+    setInput('');
+    onSend(cmd);
+  };
+
   const currentRoom = gameState?.rooms.find(r => r.current);
   const bgImage = roomImage(scenario, currentRoom?.image);
 
@@ -93,7 +99,7 @@ export function SimulationPanel({
 
       {/* Rooms Panel - Left Side */}
       <div className="absolute top-8 left-8 w-72 max-h-[calc(100vh-4rem)] overflow-y-auto bg-black/60 border border-gray-800 p-4 rounded z-20 backdrop-blur-sm" style={{ marginTop: '3.5rem' }}>
-        <GamePanel state={gameState} scenario={scenario} onItemClick={handleItemClick} />
+        <GamePanel state={gameState} scenario={scenario} onItemClick={handleItemClick} onRoomClick={handleRoomClick} />
       </div>
 
       {/* Inventory Panel - Right Side */}
