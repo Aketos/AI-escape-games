@@ -1,165 +1,568 @@
-{
-  "room_id": "cryo_room",
-  "name": "Salle de Cryogénisation",
-  "items": {
-    "zone_sol": {
-      "name": "Le sol près du caisson",
-      "visible": true,
-      "inspected": false,
-      "description_on_inspect": "Le sol métallique est couvert de givre. En y regardant de plus près, vous remarquez une masse sombre recroquevillée près d'une grille d'aération : c'est une blouse de scientifique abandonnée.",
-      "contains": [
-        "blouse_scientifique"
-      ],
-      "type": "zone"
+[
+  {
+    "room_id": "cryo_room",
+    "name": "Cryogenics Room",
+    "image": "cryo_room.png",
+    "exits": {
+      "corridor_a": "porte_corridor_a"
     },
-    "zone_bureau": {
-      "name": "Le bureau au fond",
-      "visible": true,
-      "inspected": false,
-      "description_on_inspect": "Vous vous approchez du bureau. Il est encombré de câbles coupés. Au milieu du désordre, vous identifiez un encodeur de cartes magnétiques, un terminal de sécurité éteint, et un vieux moniteur brisé.",
-      "contains": [
-        "encodeur_magnetique",
-        "terminal_securite",
-        "moniteur_brise"
-      ],
-      "type": "zone"
+    "items": {
+      "zone_sol": {
+        "name": "The floor by the pod",
+        "visible": true,
+        "inspected": false,
+        "description_on_inspect": "The metal floor is covered in frost. Looking closer, you notice a dark heap curled up near an air vent: an abandoned lab coat.",
+        "contains": [
+          "blouse_scientifique"
+        ],
+        "type": "zone"
+      },
+      "zone_bureau": {
+        "name": "The desk at the back",
+        "visible": true,
+        "inspected": false,
+        "description_on_inspect": "You approach the desk. It is cluttered with severed cables. In the mess you make out a magnetic card encoder, a dead security terminal and an old broken monitor.",
+        "contains": [
+          "encodeur_magnetique",
+          "terminal_securite",
+          "moniteur_brise"
+        ],
+        "type": "zone"
+      },
+      "zone_mur_gauche": {
+        "name": "The large left wall",
+        "visible": true,
+        "inspected": false,
+        "description_on_inspect": "Most of the walls are covered in cooling pipes, but a wide section of this wall is completely bare: a single smooth metal plate.",
+        "contains": [
+          "mur_metallique",
+          "tuyaux_refroidissement"
+        ],
+        "type": "zone"
+      },
+      "zone_plafond": {
+        "name": "The ceiling and the ducts",
+        "visible": true,
+        "inspected": false,
+        "description_on_inspect": "Looking up, you see the ventilation system turning sluggishly. One of the ceiling access panels hangs ajar, a length of climbing strap dangling from it.",
+        "contains": [
+          "sangle_escalade"
+        ],
+        "type": "zone"
+      },
+      "blouse_scientifique": {
+        "name": "Torn lab coat",
+        "visible": false,
+        "inspected": false,
+        "description_on_inspect": "The coat is stained with dried blood. In the pocket there is a glass vial and a blank card.",
+        "contains": [
+          "fiole_uv",
+          "carte_vierge"
+        ],
+        "type": "item"
+      },
+      "mur_metallique": {
+        "name": "The bare metal plate",
+        "visible": false,
+        "is_collectible": false,
+        "state": "dirty",
+        "requires": "fiole_uv",
+        "consumes_item": true,
+        "description_on_inspect": "A plain brushed-metal plate. Its center seems to have been wiped recently, as if to erase something.",
+        "success_message": "The liquid reacts instantly. Glowing digits appear: 8-4-2-1.",
+        "fail_message": "A plain brushed-metal plate. Its center seems to have been wiped recently.",
+        "success_state": "revealed",
+        "success_sfx": "sfx_liquid_splash",
+        "type": "item"
+      },
+      "encodeur_magnetique": {
+        "name": "Card encoder",
+        "visible": false,
+        "is_collectible": false,
+        "state": "waiting_card",
+        "requires": "carte_vierge",
+        "consumes_item": true,
+        "success_message": "The encoder swallows the blank card with a soft click. Its screen lights up: 'ENTER 4-DIGIT PIN TO ENCODE'.",
+        "fail_message": "The device blinks red. It needs a blank card to work.",
+        "success_state": "waiting_pin",
+        "success_sfx": "sfx_machine_whir",
+        "pin_code": "8421",
+        "pin_success_state": "encoded",
+        "pin_success_message": "Code accepted. The encoder spits out an encoded level 1 access card.",
+        "produces": [
+          "carte_encodee_lvl1"
+        ],
+        "type": "item"
+      },
+      "terminal_securite": {
+        "name": "Security terminal",
+        "visible": false,
+        "is_collectible": false,
+        "state": "locked",
+        "requires": "carte_encodee_lvl1",
+        "success_message": "The reader turns green. A heavy mechanism engages somewhere in the room. The door to Corridor A unlocks.",
+        "fail_message": "The terminal reads 'ACCESS DENIED'. It needs a valid level 1 access card.",
+        "success_state": "unlocked",
+        "success_sfx": "sfx_door_heavy_unlock",
+        "unlocks": [
+          "porte_corridor_a"
+        ],
+        "type": "item"
+      },
+      "porte_corridor_a": {
+        "name": "Door to Corridor A",
+        "visible": false,
+        "type": "item",
+        "state": "locked",
+        "description_on_inspect": "Your only way out. But first it has to be unlocked from the security terminal."
+      },
+      "fiole_uv": {
+        "name": "Vial of luminol",
+        "visible": false,
+        "is_collectible": true,
+        "description_on_inspect": "The label reads: 'Luminol reagent. Instantly reveals polymer inks on smooth surfaces.'",
+        "type": "item"
+      },
+      "carte_vierge": {
+        "name": "Blank magnetic card",
+        "visible": false,
+        "is_collectible": true,
+        "description_on_inspect": "A plain white access card with no data on it.",
+        "type": "item"
+      },
+      "carte_encodee_lvl1": {
+        "name": "Level 1 access card",
+        "visible": false,
+        "is_collectible": true,
+        "description_on_inspect": "The card has been encoded with level 1 clearance.",
+        "type": "item"
+      },
+      "sangle_escalade": {
+        "name": "Kevlar climbing strap",
+        "visible": false,
+        "is_collectible": true,
+        "description_on_inspect": "An ultra-strong tactical strap with a hardened steel carabiner.",
+        "type": "item"
+      },
+      "moniteur_brise": {
+        "name": "Broken monitor",
+        "visible": false,
+        "is_collectible": false,
+        "inspected": false,
+        "description_on_inspect": "The CRT screen is completely smashed. Digging through the glass shards, you find nothing but an old sticky note saying 'Buy milk'. Useless.",
+        "type": "item"
+      },
+      "tuyaux_refroidissement": {
+        "name": "Cooling pipes",
+        "visible": false,
+        "is_collectible": false,
+        "inspected": false,
+        "state": "frozen",
+        "requires": "chalumeau_thermique",
+        "description_on_inspect": "You run your hand along the pipework. It is covered in thick, solid ice. Something seems embedded in the ice where the two big pipes meet, but there is no freeing it with bare hands.",
+        "success_message": "The torch flame melts the ice in seconds. A small security key drops to the floor with a metallic clink.",
+        "fail_message": "You try to scrape the ice, but you only freeze your fingers. You would need a strong, focused heat source.",
+        "contains": [
+          "cle_securite_rouge"
+        ],
+        "success_state": "melted",
+        "success_sfx": "sfx_ice_melting",
+        "type": "item"
+      },
+      "cle_securite_rouge": {
+        "name": "Red security key",
+        "visible": false,
+        "is_collectible": true,
+        "description_on_inspect": "A small metal key with a bright red head. It seems to belong to a control panel.",
+        "type": "item"
+      }
+    }
+  },
+  {
+    "room_id": "corridor_a",
+    "name": "Corridor Sector A",
+    "description": "A transit junction bathed in a terrifying strobe light. The walls are scarred with what look like plasma burns.",
+    "image": "corridor_a.png",
+    "exits": {
+      "cryo_room": "",
+      "medical_lab": "porte_labo",
+      "security_airlock": "porte_sas"
     },
-    "zone_mur_gauche": {
-      "name": "Le grand mur gauche",
-      "visible": true,
-      "inspected": false,
-      "description_on_inspect": "La plupart des murs sont recouverts de tuyaux de refroidissement, mais une large section de ce mur est parfaitement nue, constituée d'une simple plaque métallique lisse.",
-      "contains": [
-        "mur_metallique",
-        "tuyaux_refroidissement"
-      ],
-      "type": "zone"
+    "items": {
+      "zone_cadavre": {
+        "name": "Shapeless mass in the middle of the corridor",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "It is the corpse of a security guard, horribly mutilated. Searching the remains, you find a lighter and, disturbingly, notice that his hand has been cleanly severed but left lying there.",
+        "contains": [
+          "briquet",
+          "main_coupee"
+        ]
+      },
+      "zone_portes": {
+        "name": "The various access doors",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "Behind you is the open door to the cryo room. Ahead, a double door to the Medical Lab, and a huge armored door marked 'Security Airlock'.",
+        "contains": [
+          "porte_labo",
+          "porte_sas"
+        ]
+      },
+      "briquet": {
+        "name": "Storm lighter",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "A heavy metal lighter. The flame still works."
+      },
+      "main_coupee": {
+        "name": "Guard's severed hand",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "It is grisly, but its biometric prints are still readable."
+      },
+      "porte_labo": {
+        "name": "Medical Lab door",
+        "visible": false,
+        "type": "item",
+        "description_on_inspect": "The door opens easily; the lab's security seems to be down."
+      },
+      "porte_sas": {
+        "name": "Security Airlock door",
+        "visible": false,
+        "type": "item",
+        "state": "locked",
+        "requires": "carte_encodee_lvl2",
+        "description_on_inspect": "Locked. The holographic reader shows 'LEVEL 2 REQUIRED'.",
+        "success_message": "The level 2 card grants access. The armored door slides heavily aside, revealing the decontamination airlock."
+      }
+    }
+  },
+  {
+    "room_id": "medical_lab",
+    "name": "Medical Lab",
+    "description": "The smell of chemicals and rotting flesh is suffocating. Dozens of test tubes lie shattered on the floor.",
+    "image": "medical_lab.png",
+    "exits": {
+      "corridor_a": "",
+      "morgue": "porte_morgue"
     },
-    "zone_plafond": {
-      "name": "Le plafond et les conduits",
-      "visible": true,
-      "inspected": false,
-      "description_on_inspect": "En levant les yeux, vous voyez le système de ventilation qui tourne au ralenti. L'un des panneaux d'accès du plafond est entrouvert, laissant pendre un bout de sangle d'escalade.",
-      "contains": [
-        "sangle_escalade"
-      ],
-      "type": "zone"
+    "items": {
+      "zone_paillasse": {
+        "name": "The research benches",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "The equipment has been wrecked. A single intact bottle stands amid the debris: an aerosol can of highly flammable solvent.",
+        "contains": [
+          "bombe_aerosol"
+        ]
+      },
+      "zone_bureau_dir": {
+        "name": "The director's office",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "A glass-walled office smeared with blood. An 'Access Upgrade Terminal' still blinks inside, asking for biometric validation.",
+        "contains": [
+          "terminal_surclassement"
+        ]
+      },
+      "zone_morgue": {
+        "name": "The dark corridor at the back",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "A battered swinging door reads 'Morgue'. The air there is even colder.",
+        "contains": [
+          "porte_morgue"
+        ]
+      },
+      "bombe_aerosol": {
+        "name": "Flammable aerosol",
+        "visible": false,
+        "type": "item",
+        "requires": "briquet",
+        "consumes_item": true,
+        "description_on_inspect": "A can of industrial solvent. Paired with a flame, it would make a fearsome improvised flamethrower.",
+        "success_message": "You tape the lighter in front of the aerosol nozzle with medical tape. You have just built an improvised blowtorch.",
+        "produces": [
+          "chalumeau_thermique"
+        ]
+      },
+      "chalumeau_thermique": {
+        "name": "Improvised blowtorch",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "Very dangerous, but it spits an extremely hot blue flame."
+      },
+      "terminal_surclassement": {
+        "name": "Upgrade terminal",
+        "visible": false,
+        "type": "item",
+        "requires": "main_coupee",
+        "description_on_inspect": "It can raise the privileges of an existing access card, provided a guard's fingerprint is supplied.",
+        "success_message": "The biometric scan of the severed hand is accepted. Your profile is upgraded. The terminal issues a level 2 access card.",
+        "produces": [
+          "carte_encodee_lvl2"
+        ]
+      },
+      "carte_encodee_lvl2": {
+        "name": "Level 2 access card",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "The pass through the Security Airlock off Corridor A."
+      },
+      "porte_morgue": {
+        "name": "Morgue door",
+        "visible": false,
+        "type": "item",
+        "description_on_inspect": "Wide open, and terrifying."
+      }
+    }
+  },
+  {
+    "room_id": "morgue",
+    "name": "The Morgue",
+    "description": "The acoustics in this room are dead. Rows of stainless-steel mortuary drawers line the walls under a crackling black light.",
+    "image": "morgue.png",
+    "exits": {
+      "medical_lab": ""
     },
-    "blouse_scientifique": {
-      "name": "Blouse de scientifique déchirée",
-      "visible": false,
-      "inspected": false,
-      "description_on_inspect": "La blouse est tachée de sang séché. Dans la poche, il y a une fiole en verre et une carte vierge.",
-      "contains": [
-        "fiole_uv",
-        "carte_vierge"
-      ],
-      "type": "item"
+    "items": {
+      "zone_casiers": {
+        "name": "The wall of mortuary drawers",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "Most are open and horribly empty. But drawer number 13 is bent, jammed from the inside. There is a metal ring to pull it, but with your arms alone it will not budge.",
+        "contains": [
+          "tiroir_coince"
+        ]
+      },
+      "tiroir_coince": {
+        "name": "Jammed mortuary drawer",
+        "visible": false,
+        "type": "item",
+        "requires": "sangle_escalade",
+        "description_on_inspect": "Impossible to pull by hand. The metal ring is very solid; you would need to hook onto it and lever with your whole weight.",
+        "success_message": "You clip the strap's carabiner to the ring. Pulling on the strap with all your weight, you burst the drawer open with a crash. Inside, a dead engineer clutches a sonic screwdriver.",
+        "contains": [
+          "tournevis_sonique"
+        ]
+      },
+      "tournevis_sonique": {
+        "name": "Sonic screwdriver",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "A cutting-edge tool that forces most maintenance panels by unscrewing their fasteners instantly."
+      }
+    }
+  },
+  {
+    "room_id": "security_airlock",
+    "name": "Security Airlock",
+    "description": "A small sealed room. The moment you step in, the doors seal and a yellowish gas starts spraying from the ceiling. CHRONOS watches your vital signs drop.",
+    "image": "security_airlock.png",
+    "exits": {
+      "corridor_a": "",
+      "corridor_b": "grille_gaz"
     },
-    "mur_metallique": {
-      "name": "La plaque métallique nue",
-      "visible": true,
-      "is_collectible": false,
-      "state": "dirty",
-      "requires": "fiole_uv",
-      "description_on_inspect": "Une simple plaque de métal brossé. Elle semble avoir été essuyée récemment en son centre, comme pour effacer quelque chose.",
-      "success_message": "Le liquide réagit immédiatement. Des chiffres fluorescents apparaissent : 8-4-2-1.",
-      "fail_message": "Une simple plaque de métal brossé. Elle semble avoir été essuyée récemment en son centre.",
-      "success_state": "revealed",
-      "success_sfx": "sfx_liquid_splash",
-      "type": "item"
+    "items": {
+      "zone_ventilation_sas": {
+        "name": "The large ceiling vent",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "The toxic gas pours out of here. The grille is screwed down tight. If you could open it, you could reach the emergency mechanism to stop the fans.",
+        "contains": [
+          "grille_gaz"
+        ]
+      },
+      "grille_gaz": {
+        "name": "Gas diffuser grille",
+        "visible": false,
+        "type": "item",
+        "requires": "tournevis_sonique",
+        "state": "locked",
+        "description_on_inspect": "Held by round industrial security screws.",
+        "success_message": "The sonic screwdriver frees the screws in an instant. You rip the grille away and pull the red emergency lever. The gas stops. The door to Corridor B opens, and you can breathe again.",
+        "success_sfx": "sfx_gas_hiss_stop"
+      }
+    }
+  },
+  {
+    "room_id": "corridor_b",
+    "name": "Corridor Sector B",
+    "description": "This sector is completely wrecked. Smoke creeps across the metal floor. At the far end looms the gigantic door of the generator room.",
+    "image": "corridor_b.png",
+    "exits": {
+      "security_airlock": "",
+      "armory": "",
+      "hydroponics": "",
+      "crew_quarters": "",
+      "generator_room": "porte_generateur"
     },
-    "encodeur_magnetique": {
-      "name": "Encodeur de cartes",
-      "visible": false,
-      "is_collectible": false,
-      "state": "waiting_card",
-      "requires": "carte_vierge",
-      "consumes_item": true,
-      "success_message": "L'encodeur avale la carte vierge avec un petit clic. Son écran s'allume et affiche : 'ENTREZ LE CODE PIN A 4 CHIFFRES POUR ENCODAGE'.",
-      "fail_message": "L'appareil clignote en rouge. Il a besoin d'un support vierge pour fonctionner.",
-      "success_state": "waiting_pin",
-      "success_sfx": "sfx_machine_whir",
-      "pin_code": "8421",
-      "pin_success_state": "encoded",
-      "pin_success_message": "Code accepté. L'encodeur recrache une carte d'accès de niveau 1 encodée.",
-      "produces": [
-        "carte_encodee"
-      ],
-      "type": "item"
+    "items": {
+      "zone_accès_corridor_b": {
+        "name": "The sector's many doors",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "Three standard doors lead to the Armory, the Hydroponic Greenhouse and the Crew Quarters. And there is the immense hatch to the generators.",
+        "contains": [
+          "porte_generateur"
+        ]
+      },
+      "porte_generateur": {
+        "name": "Generator Room console",
+        "visible": false,
+        "type": "item",
+        "requires": "carte_encodee_lvl3",
+        "state": "locked",
+        "description_on_inspect": "The console demands level 3 clearance to raise the main shield.",
+        "success_message": "The card is accepted. The shield rises, revealing the beating heart of the ship."
+      }
+    }
+  },
+  {
+    "room_id": "armory",
+    "name": "The Armory",
+    "description": "The weapon racks have been emptied, evidence of a desperate defense. Spent casings lie everywhere.",
+    "image": "armory.png",
+    "exits": {
+      "corridor_b": ""
     },
-    "terminal_securite": {
-      "name": "Terminal de sécurité",
-      "visible": false,
-      "is_collectible": false,
-      "state": "locked",
-      "requires": "carte_encodee",
-      "success_message": "Le lecteur passe au vert. Un lourd mécanisme se déclenche dans la pièce. La porte principale se déverrouille.",
-      "fail_message": "Le terminal indique 'ACCÈS REFUSÉ'. Il faut scanner une carte d'accès valide de niveau 1.",
-      "success_state": "unlocked",
-      "success_sfx": "sfx_door_heavy_unlock",
-      "wins_game": true,
-      "type": "item"
+    "items": {
+      "zone_armoires": {
+        "name": "The tactical maintenance lockers",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "One of the metal lockers has been smashed in. Inside, among the junk, is some heavy equipment.",
+        "contains": [
+          "pied_de_biche",
+          "lampe_torche"
+        ]
+      },
+      "pied_de_biche": {
+        "name": "Heavy crowbar",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "A huge bar of forged steel. Perfect for forcing anything that resists."
+      },
+      "lampe_torche": {
+        "name": "Military flashlight",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "Its halogen beam would pierce any darkness."
+      }
+    }
+  },
+  {
+    "room_id": "hydroponics",
+    "name": "Hydroponic Greenhouse",
+    "description": "The place is plunged into absolute darkness and smells of rotting soil. The humidity is crushing.",
+    "image": "hydroponics.png",
+    "exits": {
+      "corridor_b": ""
     },
-    "fiole_uv": {
-      "name": "Fiole de luminol",
-      "visible": false,
-      "is_collectible": true,
-      "description_on_inspect": "L'étiquette indique : 'Réactif au luminol. Révèle instantanément les encres polymères sur les surfaces lisses'.",
-      "type": "item"
+    "items": {
+      "zone_vegetation": {
+        "name": "The mass of vegetation in the dark",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "You shine your flashlight. The plants have mutated and barricade access to a computer console at the back of the room. Their vines are as thick as steel cables.",
+        "contains": [
+          "plantes_mutantes"
+        ]
+      },
+      "plantes_mutantes": {
+        "name": "Barricade of mutant plants",
+        "visible": false,
+        "type": "item",
+        "requires": "chalumeau_thermique",
+        "description_on_inspect": "They are alive and react to light. They would have to be destroyed to get through.",
+        "success_message": "The torch's fire chars the mutant vegetation amid a horrible vegetal shriek. The console is clear, and on it you find a level 3 access card!",
+        "produces": [
+          "carte_encodee_lvl3"
+        ]
+      },
+      "carte_encodee_lvl3": {
+        "name": "Level 3 access card",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "Maximum clearance. The key to the generator."
+      }
+    }
+  },
+  {
+    "room_id": "crew_quarters",
+    "name": "Crew Quarters",
+    "description": "A cramped dormitory. The bunk beds are overturned, personal belongings scattered. A tragic silence reigns here.",
+    "image": "crew_quarters.png",
+    "exits": {
+      "corridor_b": ""
     },
-    "carte_vierge": {
-      "name": "Carte magnétique vierge",
-      "visible": false,
-      "is_collectible": true,
-      "description_on_inspect": "Une simple carte d'accès blanche sans aucune donnée.",
-      "type": "item"
+    "items": {
+      "zone_casiers_perso": {
+        "name": "The row of personal lockers",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "Most are open. But the Captain's locker is still sealed with a sturdy mechanical lock.",
+        "contains": [
+          "casier_capitaine"
+        ]
+      },
+      "casier_capitaine": {
+        "name": "Captain's locker",
+        "visible": false,
+        "type": "item",
+        "requires": "pied_de_biche",
+        "description_on_inspect": "Thick metal, impossible to open without serious leverage.",
+        "success_message": "You wedge in the crowbar and force it. The metal gives with a loud CRACK. Inside is the captain's logbook.",
+        "contains": [
+          "journal_de_bord"
+        ]
+      },
+      "journal_de_bord": {
+        "name": "Holographic logbook",
+        "visible": false,
+        "type": "item",
+        "is_collectible": true,
+        "description_on_inspect": "An audio recording plays on a loop: 'If they reach the generator, we are dead. I hid the Red Survival Key in the cryogenics system, embedded in the ice of the main pipes.'"
+      }
+    }
+  },
+  {
+    "room_id": "generator_room",
+    "name": "Generator Room",
+    "description": "A colossal cavern of engineering. A giant digital countdown ticks off the last minutes of oxygen. This is where it all comes down.",
+    "image": "generator_room.png",
+    "exits": {
+      "corridor_b": ""
     },
-    "carte_encodee": {
-      "name": "Carte d'accès niveau 1",
-      "visible": false,
-      "is_collectible": true,
-      "description_on_inspect": "La carte a été encodée avec l'autorisation de niveau 1.",
-      "type": "item"
-    },
-    "sangle_escalade": {
-      "name": "Sangle d'escalade en kevlar",
-      "visible": false,
-      "is_collectible": true,
-      "description_on_inspect": "Une sangle tactique ultra-résistante avec un mousqueton en acier trempé.",
-      "type": "item"
-    },
-    "moniteur_brise": {
-      "name": "Moniteur brisé",
-      "visible": false,
-      "is_collectible": false,
-      "inspected": false,
-      "description_on_inspect": "L'écran cathodique est complètement explosé. En fouillant les débris de verre, vous ne trouvez rien d'autre qu'un vieux post-it disant 'Acheter du lait'. Inutile.",
-      "type": "item"
-    },
-    "tuyaux_refroidissement": {
-      "name": "Tuyaux de refroidissement",
-      "visible": false,
-      "is_collectible": false,
-      "inspected": false,
-      "state": "frozen",
-      "requires": "chalumeau_thermique",
-      "description_on_inspect": "Vous passez la main sur la tuyauterie. C'est recouvert d'une glace épaisse et solide. Quelque chose semble encastré dans la glace à l'intersection des deux gros tuyaux, mais impossible de le dégager à mains nues.",
-      "success_message": "La flamme du chalumeau fait fondre la glace en quelques secondes. Une petite clé de sécurité tombe au sol avec un tintement métallique.",
-      "fail_message": "Vous essayez de gratter la glace, mais vous vous gelez simplement les doigts. Il vous faudrait une forte source de chaleur concentrée.",
-      "contains": [
-        "cle_securite_rouge"
-      ],
-      "success_state": "melted",
-      "success_sfx": "sfx_ice_melting",
-      "type": "item"
-    },
-    "cle_securite_rouge": {
-      "name": "Clé de sécurité rouge",
-      "visible": false,
-      "is_collectible": true,
-      "description_on_inspect": "Une petite clé en métal avec un embout rouge vif. Elle semble appartenir à un panneau de commande.",
-      "type": "item"
+    "items": {
+      "zone_console_centrale": {
+        "name": "The central control pillar",
+        "visible": true,
+        "type": "zone",
+        "description_on_inspect": "A dust-covered console. At its center, a triangular slot that takes a red hardware security key.",
+        "contains": [
+          "console_finale"
+        ]
+      },
+      "console_finale": {
+        "name": "Emergency key slot",
+        "visible": false,
+        "type": "item",
+        "requires": "cle_securite_rouge",
+        "description_on_inspect": "The manual restart system for life support.",
+        "success_message": "You insert the red key and turn it. The giant turbines roar to life. Fresh air bursts from the vents. CHRONOS murmurs 'System anomaly... shutting down' before going dark. You survived.",
+        "success_sfx": "sfx_generators_power_up_win",
+        "wins_game": true
+      }
     }
   }
-}
+]

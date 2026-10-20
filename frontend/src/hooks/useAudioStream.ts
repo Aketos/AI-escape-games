@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Recorder from 'opus-recorder';
 import encoderPath from 'opus-recorder/dist/encoderWorker.min.js?url';
 import { OggOpusDecoderWebWorker } from 'ogg-opus-decoder';
+import { playSfx } from '../utils/sfx';
 
 type ConnectionStatus = 'Idle' | 'Booting' | 'Ready' | 'Connected' | 'Disconnected';
 
@@ -13,7 +14,6 @@ interface UseAudioStreamReturn {
   aiVolume: number;
   logs: string[];
   onGameState: (cb: (data: unknown) => void) => void;
-  onIntroComplete: (cb: () => void) => void;
 }
 
 export function useAudioStream(url: string): UseAudioStreamReturn {
@@ -25,7 +25,6 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
   const [isAISpeaking, setIsAISpeaking] = useState(false);
 
   const gameStateCallbackRef = useRef<((data: unknown) => void) | null>(null);
-  const introCompleteCallbackRef = useRef<(() => void) | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -80,7 +79,7 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       mediaStreamRef.current = stream;
       
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioCtx = new AudioContext();
       audioCtxRef.current = audioCtx;
       nextPlayTimeRef.current = 0;
 
@@ -116,10 +115,7 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
             addLog(data.payload);
           } else if (data.type === 'sfx_trigger') {
             addLog(`SFX Trigger: ${data.payload}`);
-            const scenarioPath = scenarioRef.current ? `${scenarioRef.current}/` : '';
-            const audio = new Audio(`/sounds/${scenarioPath}${data.payload}.opus`);
-            audio.volume = 0.85; // Set default SFX volume high enough to be immersive
-            audio.play().catch(e => console.warn(`Could not play SFX ${data.payload}.opus:`, e));
+            playSfx(scenarioRef.current, data.payload);
           } else if (data.type === 'ai_audio_chunk') {
             setIsAISpeaking(true);
             if (aiSilenceTimerRef.current) {
@@ -133,10 +129,6 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
           } else if (data.type === 'game_state') {
             if (gameStateCallbackRef.current) {
               gameStateCallbackRef.current(data.payload);
-            }
-          } else if (data.type === 'intro_complete') {
-            if (introCompleteCallbackRef.current) {
-              introCompleteCallbackRef.current();
             }
           }
         } catch (e) {
@@ -295,9 +287,5 @@ export function useAudioStream(url: string): UseAudioStreamReturn {
     gameStateCallbackRef.current = cb;
   }, []);
 
-  const onIntroComplete = useCallback((cb: () => void) => {
-    introCompleteCallbackRef.current = cb;
-  }, []);
-
-  return { status, connect, disconnect, micVolume, aiVolume, logs, onGameState, onIntroComplete };
+  return { status, connect, disconnect, micVolume, aiVolume, logs, onGameState };
 }

@@ -1,0 +1,4 @@
+# npm ci and vite build run inside the image; never copy local results over them.
+node_modules
+dist
+*.tsbuildinfo

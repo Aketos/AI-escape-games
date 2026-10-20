@@ -37,4 +37,9 @@ server {
         proxy_pass ${BACKEND_URL}/scenarios;
         proxy_ssl_server_name on;
     }
+
+    location /api/ {
+        proxy_pass ${BACKEND_URL}/api/;
+        proxy_ssl_server_name on;
+    }
 }

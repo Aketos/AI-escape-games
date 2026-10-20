@@ -4,6 +4,8 @@ REGION ?= fr-par
 REGISTRY_NAME ?= escape-game-repo
 BACKEND_IMAGE ?= escape-game-backend
 FRONTEND_IMAGE ?= escape-game-frontend
+GAME_LANGUAGE ?= fr
+# French voice by default: set an English one when GAME_LANGUAGE=en.
 UNMUTE_VOICE ?= cml-tts/fr/12080_11650_000047-0001_enhanced.wav
 LLM_UPSTREAM_URL ?= https://api.scaleway.ai/0cf90930-f182-408a-a3c1-78350db643e4/v1
 TAG ?= latest
@@ -17,7 +19,7 @@ SCW_PROJECT_ID ?= $(shell scw config get default-project-id)
 LLM_MODEL ?= gemma-3-27b-it
 LLM_API_KEY ?= $(SCW_SECRET_KEY)
 
-.PHONY: scw-login build-push-backend build-push-frontend deploy-backend deploy-frontend deploy-all init-registry init-namespace new-scenario
+.PHONY: check-proxy-token scw-login build-push-backend build-push-frontend deploy-backend deploy-frontend deploy-all init-registry init-namespace new-scenario
 
 # 1. Authenticate Docker to Scaleway Container Registry
 scw-login:
@@ -45,17 +47,22 @@ init-namespace:
 		scw container namespace create name=$(REGISTRY_NAME)-ns region=$(REGION) -w; \
 	fi
 
+# The public LLM proxy must not run open: Unmute and the simulation UI send this token.
+check-proxy-token:
+	@if [ -z "$(LLM_PROXY_TOKEN)" ]; then echo "LLM_PROXY_TOKEN is empty: set it in secrets.mk (see secrets.mk.example)."; exit 1; fi
+
 # 4. Deploy Backend
-deploy-backend: build-push-backend init-namespace
+# max-scale=1: the game lives in one process, and a second instance would hold a different game.
+deploy-backend: check-proxy-token build-push-backend init-namespace
 	@echo "Deploying backend container..."
 	@NAMESPACE_ID=$$(scw container namespace list name=$(REGISTRY_NAME)-ns region=$(REGION) -o json | jq -r '.[0].id'); \
 	CONTAINER_ID=$$(scw container container list namespace-id=$$NAMESPACE_ID name=$(BACKEND_IMAGE)-container region=$(REGION) -o json | jq -r '.[0].id // empty'); \
 	if [ -z "$$CONTAINER_ID" ]; then \
 		echo "Creating new container..."; \
-		CONTAINER_ID=$$(scw container container create namespace-id=$$NAMESPACE_ID name=$(BACKEND_IMAGE)-container registry-image=$(REGISTRY_ENDPOINT)/$(BACKEND_IMAGE):$(TAG) port=8080 environment-variables.SCALEWAY_PROJECT_ID="$(SCW_PROJECT_ID)" environment-variables.UNMUTE_WS_URL="$(UNMUTE_WS_URL)" environment-variables.UNMUTE_VOICE="$(UNMUTE_VOICE)" environment-variables.LLM_UPSTREAM_URL="$(LLM_UPSTREAM_URL)" environment-variables.LLM_MODEL="$(LLM_MODEL)" secret-environment-variables.0.key="SCALEWAY_MOSHI_API_KEY" secret-environment-variables.0.value="$(SCW_SECRET_KEY)" secret-environment-variables.1.key="LLM_API_KEY" secret-environment-variables.1.value="$(LLM_API_KEY)" region=$(REGION) -o json | jq -r '.id'); \
+		CONTAINER_ID=$$(scw container container create namespace-id=$$NAMESPACE_ID name=$(BACKEND_IMAGE)-container registry-image=$(REGISTRY_ENDPOINT)/$(BACKEND_IMAGE):$(TAG) port=8080 environment-variables.SCALEWAY_PROJECT_ID="$(SCW_PROJECT_ID)" environment-variables.UNMUTE_WS_URL="$(UNMUTE_WS_URL)" environment-variables.UNMUTE_VOICE="$(UNMUTE_VOICE)" environment-variables.GAME_LANGUAGE="$(GAME_LANGUAGE)" environment-variables.LLM_UPSTREAM_URL="$(LLM_UPSTREAM_URL)" environment-variables.LLM_MODEL="$(LLM_MODEL)" secret-environment-variables.0.key="SCALEWAY_MOSHI_API_KEY" secret-environment-variables.0.value="$(SCW_SECRET_KEY)" secret-environment-variables.1.key="LLM_API_KEY" secret-environment-variables.1.value="$(LLM_API_KEY)" secret-environment-variables.2.key="LLM_PROXY_TOKEN" secret-environment-variables.2.value="$(LLM_PROXY_TOKEN)" max-scale=1 region=$(REGION) -o json | jq -r '.id'); \
 	else \
 		echo "Updating existing container..."; \
-		scw container container update $$CONTAINER_ID registry-image=$(REGISTRY_ENDPOINT)/$(BACKEND_IMAGE):$(TAG) environment-variables.SCALEWAY_PROJECT_ID="$(SCW_PROJECT_ID)" environment-variables.UNMUTE_WS_URL="$(UNMUTE_WS_URL)" environment-variables.UNMUTE_VOICE="$(UNMUTE_VOICE)" environment-variables.LLM_UPSTREAM_URL="$(LLM_UPSTREAM_URL)" environment-variables.LLM_MODEL="$(LLM_MODEL)" secret-environment-variables.0.key="SCALEWAY_MOSHI_API_KEY" secret-environment-variables.0.value="$(SCW_SECRET_KEY)" secret-environment-variables.1.key="LLM_API_KEY" secret-environment-variables.1.value="$(LLM_API_KEY)" region=$(REGION) > /dev/null; \
+		scw container container update $$CONTAINER_ID registry-image=$(REGISTRY_ENDPOINT)/$(BACKEND_IMAGE):$(TAG) environment-variables.SCALEWAY_PROJECT_ID="$(SCW_PROJECT_ID)" environment-variables.UNMUTE_WS_URL="$(UNMUTE_WS_URL)" environment-variables.UNMUTE_VOICE="$(UNMUTE_VOICE)" environment-variables.GAME_LANGUAGE="$(GAME_LANGUAGE)" environment-variables.LLM_UPSTREAM_URL="$(LLM_UPSTREAM_URL)" environment-variables.LLM_MODEL="$(LLM_MODEL)" secret-environment-variables.0.key="SCALEWAY_MOSHI_API_KEY" secret-environment-variables.0.value="$(SCW_SECRET_KEY)" secret-environment-variables.1.key="LLM_API_KEY" secret-environment-variables.1.value="$(LLM_API_KEY)" secret-environment-variables.2.key="LLM_PROXY_TOKEN" secret-environment-variables.2.value="$(LLM_PROXY_TOKEN)" max-scale=1 region=$(REGION) > /dev/null; \
 	fi; \
 	echo "Waiting for backend container to be ready for deployment..."; \
 	while true; do \

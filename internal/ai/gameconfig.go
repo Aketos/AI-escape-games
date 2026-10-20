@@ -15,6 +15,7 @@ type GameConfig struct {
 	IntroDirective string
 	IntroPrompt    string
 	ScenarioDir    string // path to config/<lang>/<scenario> directory
+	Lang           string // GAME_LANGUAGE the scenario was loaded for
 }
 
 // ScenarioInfo describes a playable scenario for the frontend selection UI.
@@ -25,17 +26,29 @@ type ScenarioInfo struct {
 	Difficulty  string `json:"difficulty"`
 }
 
-// ListScenarios returns the list of available scenarios for the given language.
-// Each subdirectory of config/<lang>/ is a scenario. The scenario's display
-// name and description are read from a scenario.json file if present,
-// otherwise the directory name is used.
-func ListScenarios(lang string) ([]ScenarioInfo, error) {
+// language returns GAME_LANGUAGE (default "fr").
+func language() string {
+	if lang := os.Getenv("GAME_LANGUAGE"); lang != "" {
+		return lang
+	}
+	return "fr"
+}
+
+// languageDir returns config/<lang>, with CONFIG_DIR defaulting to "config".
+func languageDir() string {
 	configDir := os.Getenv("CONFIG_DIR")
 	if configDir == "" {
 		configDir = "config"
 	}
+	return filepath.Join(configDir, language())
+}
 
-	langDir := filepath.Join(configDir, lang)
+// ListScenarios returns the list of available scenarios for the configured
+// language. Each subdirectory of config/<lang>/ is a scenario. The scenario's
+// display name and description are read from a scenario.json file if present,
+// otherwise the directory name is used.
+func ListScenarios() ([]ScenarioInfo, error) {
+	langDir := languageDir()
 	entries, err := os.ReadDir(langDir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read scenario directory %s: %w", langDir, err)
@@ -83,17 +96,11 @@ func ListScenarios(lang string) ([]ScenarioInfo, error) {
 // The config directory defaults to "config" but can be set via CONFIG_DIR.
 // Returns an error if any config file cannot be loaded or is empty.
 func LoadGameConfig(scenario string) (*GameConfig, error) {
-	lang := os.Getenv("GAME_LANGUAGE")
-	if lang == "" {
-		lang = "fr"
+	// The name comes from the player's URL: it must be a plain directory name.
+	if scenario == "" || scenario == "." || scenario == ".." || filepath.Base(scenario) != scenario {
+		return nil, fmt.Errorf("invalid scenario name %q", scenario)
 	}
-
-	configDir := os.Getenv("CONFIG_DIR")
-	if configDir == "" {
-		configDir = "config"
-	}
-
-	scenarioDir := filepath.Join(configDir, lang, scenario)
+	scenarioDir := filepath.Join(languageDir(), scenario)
 
 	persona, err := readConfigFile(filepath.Join(scenarioDir, "persona.txt"))
 	if err != nil {
@@ -110,12 +117,13 @@ func LoadGameConfig(scenario string) (*GameConfig, error) {
 		return nil, fmt.Errorf("game config intro_prompt: %w", err)
 	}
 
-	log.Printf("Game config loaded from %s/ (language: %s, scenario: %s)", scenarioDir, lang, scenario)
+	log.Printf("Game config loaded from %s/", scenarioDir)
 	return &GameConfig{
 		Persona:        persona,
 		IntroDirective: introDirective,
 		IntroPrompt:    introPrompt,
 		ScenarioDir:    scenarioDir,
+		Lang:           language(),
 	}, nil
 }
 
