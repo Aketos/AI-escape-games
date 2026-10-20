@@ -3,6 +3,7 @@
     "room_id": "cryo_room",
     "name": "Salle de Cryogénisation",
     "image": "cryo_room.png",
+    "exits": {"corridor_a": "porte_corridor_a"},
     "items": {
       "zone_sol": {
         "name": "Le sol près du caisson",
@@ -64,6 +65,7 @@
         "is_collectible": false,
         "state": "dirty",
         "requires": "fiole_uv",
+        "consumes_item": true,
         "description_on_inspect": "Une simple plaque de métal brossé. Elle semble avoir été essuyée récemment en son centre, comme pour effacer quelque chose.",
         "success_message": "Le liquide réagit immédiatement. Des chiffres fluorescents apparaissent : 8-4-2-1.",
         "fail_message": "Une simple plaque de métal brossé. Elle semble avoir été essuyée récemment en son centre.",
@@ -177,6 +179,7 @@
     "name": "Couloir Secteur A",
     "description": "Un carrefour de transit plongé dans une lueur stroboscopique terrifiante. Les murs sont marqués par ce qui ressemble à des tirs de plasma.",
     "image": "corridor_a.png",
+    "exits": {"cryo_room": "", "medical_lab": "porte_labo", "security_airlock": "porte_sas"},
     "items": {
       "zone_cadavre": {
         "name": "Masse informe au centre du couloir",
@@ -228,6 +231,7 @@
     "name": "Laboratoire Médical",
     "description": "L'odeur de produits chimiques et de chair en décomposition est suffocante. Des dizaines de tubes à essai sont fracassés au sol.",
     "image": "medical_lab.png",
+    "exits": {"corridor_a": "", "morgue": "porte_morgue"},
     "items": {
       "zone_paillasse": {
         "name": "Les paillasses de recherche",
@@ -296,6 +300,7 @@
     "name": "La Morgue",
     "description": "L'acoustique de cette pièce est morte. Des rangées de tiroirs mortuaires en inox tapissent les murs, sous une lumière noire grésillante.",
     "image": "morgue.png",
+    "exits": {"medical_lab": ""},
     "items": {
       "zone_casiers": {
         "name": "La paroi des tiroirs mortuaires",
@@ -327,6 +332,7 @@
     "name": "Sas de Sécurité",
     "description": "Une petite pièce étanche. À peine entré, les portes se scellent et un gaz jaunâtre commence à être pulvérisé depuis le plafond. CHRONOS observe vos constantes chuter.",
     "image": "security_airlock.png",
+    "exits": {"corridor_a": "", "corridor_b": "grille_gaz"},
     "items": {
       "zone_ventilation_sas": {
         "name": "La grande grille d'aération au plafond",
@@ -340,6 +346,7 @@
         "visible": false,
         "type": "item",
         "requires": "tournevis_sonique",
+        "state": "locked",
         "description_on_inspect": "Fixée par des vis de sécurité industrielles rondes.",
         "success_message": "Le tournevis sonique dégage les vis en un instant. Vous arrachez la grille et tirez la manette rouge d'urgence. Le gaz s'arrête. La porte vers le Corridor B s'ouvre, vous permettant de respirer.",
         "success_sfx": "sfx_gas_hiss_stop"
@@ -351,6 +358,7 @@
     "name": "Couloir Secteur B",
     "description": "Ce secteur est complètement ravagé. La fumée rampe sur le sol métallique. Au fond se dresse la gigantesque porte de la salle du générateur.",
     "image": "corridor_b.png",
+    "exits": {"security_airlock": "", "armory": "", "hydroponics": "", "crew_quarters": "", "generator_room": "porte_generateur"},
     "items": {
       "zone_accès_corridor_b": {
         "name": "Les nombreuses portes du secteur",
@@ -375,6 +383,7 @@
     "name": "L'Armurerie",
     "description": "Les râteliers d'armes ont été vidés, témoignant d'une défense désespérée. Il reste des douilles partout.",
     "image": "armory.png",
+    "exits": {"corridor_b": ""},
     "items": {
       "zone_armoires": {
         "name": "Les casiers de maintenance tactique",
@@ -404,6 +413,7 @@
     "name": "Serre Hydroponique",
     "description": "L'endroit est plongé dans les ténèbres absolues et sent la terre pourrie. L'humidité y est écrasante.",
     "image": "hydroponics.png",
+    "exits": {"corridor_b": ""},
     "items": {
       "zone_vegetation": {
         "name": "La masse végétale dans l'obscurité",
@@ -435,6 +445,7 @@
     "name": "Quartiers de l'équipage",
     "description": "Un dortoir exigu. Les lits superposés sont renversés, les affaires personnelles éparpillées. Un silence tragique règne ici.",
     "image": "crew_quarters.png",
+    "exits": {"corridor_b": ""},
     "items": {
       "zone_casiers_perso": {
         "name": "L'alignement de casiers personnels",
@@ -466,6 +477,7 @@
     "name": "Salle des Générateurs",
     "description": "Une caverne colossale d'ingénierie. Un compte à rebours numérique géant égrène les dernières minutes d'oxygène. C'est ici que tout se joue.",
     "image": "generator_room.png",
+    "exits": {"corridor_b": ""},
     "items": {
       "zone_console_centrale": {
         "name": "Le pilier de commande central",

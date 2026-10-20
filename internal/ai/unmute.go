@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"escape-game/internal/game"
-
 	"github.com/gorilla/websocket"
 )
 
@@ -31,20 +29,15 @@ type UnmuteClient struct {
 	writeMu     sync.Mutex // gorilla/websocket allows only one concurrent writer
 	apiEndpoint string
 	voice       string
-	gameEngine  *game.GameEngine
-
-	instructionsMu sync.Mutex
-	gameEvents     []string
 
 	// Mic audio can arrive from the player before the Unmute connection is
 	// ready. It MUST be buffered, not dropped: the first chunks contain the
 	// Ogg Opus header pages, without which the whole stream is undecodable.
+	// pendingMu also guards conn while connecting and closed.
 	pendingMu    sync.Mutex
 	connected    bool
+	closed       bool // Close was called; a connection that finishes dialing afterwards is dropped
 	pendingAudio []string
-
-	// victorySent ensures the "victory" client event fires only once.
-	victorySent bool
 }
 
 // maxPendingAudioChunks bounds the pre-connection audio buffer (~ tens of
@@ -54,14 +47,9 @@ const maxPendingAudioChunks = 512
 // NewUnmuteClient creates a client for the Unmute realtime endpoint
 // (e.g. ws://host:port/v1/realtime). voice is an optional TTS voice path
 // from the kyutai/tts-voices repository; leave empty for the server default.
-// The CHRONOS persona and tool definitions are owned by the LLM proxy; the
-// session instructions sent here are a minimal stub just to start the session.
-func NewUnmuteClient(endpoint, voice string, engine *game.GameEngine) *UnmuteClient {
-	return &UnmuteClient{
-		apiEndpoint: endpoint,
-		voice:       voice,
-		gameEngine:  engine,
-	}
+// The persona and tool definitions are owned by the LLM proxy.
+func NewUnmuteClient(endpoint, voice string) *UnmuteClient {
+	return &UnmuteClient{apiEndpoint: endpoint, voice: voice}
 }
 
 func (c *UnmuteClient) writeJSON(v interface{}) error {
@@ -78,24 +66,14 @@ func (c *UnmuteClient) writeJSON(v interface{}) error {
 	return c.conn.WriteJSON(v)
 }
 
-// sendSessionUpdate pushes minimal session instructions to Unmute. The
-// CHRONOS persona, game state, and tool definitions are owned by the LLM
-// proxy; Unmute only needs a session config to start the conversation.
+// sendSessionUpdate starts the Unmute session. Unmute turns the instructions
+// into the LLM system prompt, which the LLM proxy replaces with the scenario
+// persona and game state, so this text is only a placeholder.
 func (c *UnmuteClient) sendSessionUpdate() error {
-	c.instructionsMu.Lock()
-	text := "Tu es un assistant vocal. Réponds en français."
-	if len(c.gameEvents) > 0 {
-		text += "\n\n=== JOURNAL DES ÉVÉNEMENTS ===\n"
-		for _, e := range c.gameEvents {
-			text += e + "\n"
-		}
-	}
-	c.instructionsMu.Unlock()
-
 	session := map[string]interface{}{
 		"instructions": map[string]interface{}{
 			"type": "constant",
-			"text": text,
+			"text": "Replaced by the escape-game LLM proxy.",
 		},
 		"allow_recording": false,
 	}
@@ -110,7 +88,7 @@ func (c *UnmuteClient) sendSessionUpdate() error {
 }
 
 // Connect establishes the WebSocket connection and configures the
-// CHRONOS Game Master persona via session.update.
+// session via session.update.
 func (c *UnmuteClient) Connect(ctx context.Context) error {
 	dialer := websocket.Dialer{
 		Subprotocols: []string{"realtime"},
@@ -123,12 +101,20 @@ func (c *UnmuteClient) Connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Unmute: %w", err)
 	}
+	// The player may have left while we were dialing: Close saw no conn then.
+	c.pendingMu.Lock()
+	if c.closed {
+		c.pendingMu.Unlock()
+		conn.Close()
+		return fmt.Errorf("player left before the Unmute connection was ready")
+	}
 	c.conn = conn
+	c.pendingMu.Unlock()
 
 	if err := c.sendSessionUpdate(); err != nil {
 		return fmt.Errorf("failed to send session config: %w", err)
 	}
-	log.Println("Unmute session configured with CHRONOS persona")
+	log.Println("Unmute session started")
 
 	// Flush mic audio that arrived while we were connecting.
 	// We must preserve the exact order of chunks (especially Opus headers).
@@ -181,18 +167,9 @@ func (c *UnmuteClient) sendAudioB64(b64 string) {
 	}
 }
 
-// SendHiddenPrompt records a game event and refreshes the session
-// instructions so the LLM sees it on its next turn.
-func (c *UnmuteClient) SendHiddenPrompt(prompt string) error {
-	c.instructionsMu.Lock()
-	c.gameEvents = append(c.gameEvents, "- "+prompt)
-	c.instructionsMu.Unlock()
-	return c.sendSessionUpdate()
-}
-
 // ReceiveLoop listens to incoming Unmute events and forwards audio to the
 // player. Game actions are handled by the LLM proxy via native tool calls;
-// UnmuteClient only needs to forward audio and emit victory events.
+// UnmuteClient only forwards audio.
 func (c *UnmuteClient) ReceiveLoop(playerWS PlayerConn) {
 	for {
 		_, p, err := c.conn.ReadMessage()
@@ -224,18 +201,10 @@ func (c *UnmuteClient) ReceiveLoop(playerWS PlayerConn) {
 				log.Printf("Failed to forward Unmute audio to player: %v", err)
 			}
 
-		case "response.text.delta":
-			// Check victory on each text delta — the LLM proxy handles all
-			// game actions, but victory notification is a client concern.
-			if !c.victorySent && c.gameEngine.IsWon() {
-				c.victorySent = true
-				_ = playerWS.WriteJSON(map[string]string{"type": "game_event", "payload": "victory"})
-			}
-
 		case "error":
 			log.Printf("Unmute error: [%s] %s", evt.Error.Type, evt.Error.Message)
 
-		case "session.updated", "response.created", "response.audio.done",
+		case "session.updated", "response.created", "response.audio.done", "response.text.delta",
 			"response.text.done",
 			"input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped",
 			"conversation.item.input_audio_transcription.delta",
@@ -268,9 +237,14 @@ func (c *UnmuteClient) SendAudioBinary(p []byte) {
 	c.sendAudioB64(base64.StdEncoding.EncodeToString(p))
 }
 
-// Close gracefully closes the Unmute connection
+// Close closes the Unmute connection, or makes a Connect still in progress
+// drop its connection.
 func (c *UnmuteClient) Close() {
-	if c.conn != nil {
-		c.conn.Close()
+	c.pendingMu.Lock()
+	c.closed = true
+	conn := c.conn
+	c.pendingMu.Unlock()
+	if conn != nil {
+		conn.Close()
 	}
 }

@@ -6,7 +6,7 @@ import { AudioVisualizer } from './components/AudioVisualizer';
 import { GamePanel, InventoryPanel } from './components/GamePanel';
 import { SimulationPanel } from './components/SimulationPanel';
 import { Mic, Terminal, Loader2, Map, ChevronUp, ChevronDown, FlaskConical } from 'lucide-react';
-import { roomImage } from './utils/imagePath';
+import { scenarioImage } from './utils/imagePath';
 
 interface Scenario {
   id: string;
@@ -18,9 +18,25 @@ interface Scenario {
 function App() {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}//${window.location.host}/ws`;
-  const { status, connect, disconnect, micVolume, aiVolume, logs, onGameState, onIntroComplete } = useAudioStream(wsUrl);
-  const { state: gameState, clearState, handleGameStateMessage, handleIntroComplete } = useGameState();
-  const sim = useSimulation();
+  const { status, connect, disconnect, micVolume, aiVolume, logs, onGameState } = useAudioStream(wsUrl);
+  const { state: gameState, clearState, handleGameStateMessage } = useGameState();
+  // Simulation calls the paid LLM, so the server asks for its LLM_PROXY_TOKEN.
+  const [simToken, setSimToken] = useState(() => {
+    try {
+      return localStorage.getItem('simToken') ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const updateSimToken = (value: string) => {
+    setSimToken(value);
+    try {
+      localStorage.setItem('simToken', value);
+    } catch {
+      // storage blocked: the token still works for this visit
+    }
+  };
+  const sim = useSimulation(simToken);
 
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<string | null>(null);
@@ -43,10 +59,6 @@ function App() {
   useEffect(() => {
     onGameState(handleGameStateMessage);
   }, [onGameState, handleGameStateMessage]);
-
-  useEffect(() => {
-    onIntroComplete(handleIntroComplete);
-  }, [onIntroComplete, handleIntroComplete]);
 
   const handleConnect = () => {
     if (!selectedScenario) return;
@@ -83,7 +95,7 @@ function App() {
   const isConnected = simActive || status === 'Connected' || status === 'Ready' || status === 'Booting';
 
   const currentRoom = (simActive ? sim.gameState : gameState)?.rooms.find(r => r.current);
-  const bgImage = roomImage(selectedScenario, currentRoom?.image);
+  const bgImage = scenarioImage(selectedScenario, currentRoom?.image);
 
   if (simActive) {
     return (
@@ -181,9 +193,19 @@ function App() {
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono text-gray-500 group-hover:text-[#00ffcc] transition-colors">
                 <FlaskConical className="w-3.5 h-3.5" />
-                <span>Mode Simulation (sans Unmute)</span>
+                <span>Simulation mode (no Unmute)</span>
               </div>
             </label>
+            {simulationMode && (
+              <input
+                type="password"
+                value={simToken}
+                onChange={(e) => updateSimToken(e.target.value)}
+                placeholder="Simulation token (LLM_PROXY_TOKEN)"
+                aria-label="Simulation token"
+                className="mt-2 w-full bg-black/60 border border-gray-800 rounded px-2 py-1.5 font-mono text-xs text-gray-300 placeholder-gray-600 focus:border-purple-400 outline-none"
+              />
+            )}
           </div>
         )}
 

@@ -1,0 +1,5 @@
+# The backend image only needs the Go sources and config/.
+.git
+frontend/
+server
+secrets.mk

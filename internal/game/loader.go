@@ -1,28 +1,37 @@
 package game
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // rawRoomState is used to unmarshal room JSON while preserving item order.
 // The Items field is unmarshalled as raw messages so we can decode items
 // one by one in declaration order.
 type rawRoomState struct {
-	RoomID      string          `json:"room_id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Image       string          `json:"image,omitempty"`
-	Items       json.RawMessage `json:"items"`
+	RoomID      string            `json:"room_id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Image       string            `json:"image,omitempty"`
+	Items       json.RawMessage   `json:"items"`
+	Exits       map[string]string `json:"exits,omitempty"`
 }
 
-// LoadScenario reads the player and room state from JSON files and initializes the GameState.
-func LoadScenario(roomPath, playerPath string) (*GameState, error) {
+// LoadScenario reads room_state.json and player_state.json from scenarioDir
+// and initializes the GameState, with engine text in lang.
+func LoadScenario(scenarioDir, lang string) (*GameState, error) {
 	gameState := NewGameState()
+	text, ok := Texts[lang]
+	if !ok {
+		return nil, fmt.Errorf("no engine text for language %q (see internal/game/text.go)", lang)
+	}
+	gameState.Text = text
 
 	// 1. Load Player State
-	playerData, err := os.ReadFile(playerPath)
+	playerData, err := os.ReadFile(filepath.Join(scenarioDir, "player_state.json"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read player state file: %w", err)
 	}
@@ -34,50 +43,58 @@ func LoadScenario(roomPath, playerPath string) (*GameState, error) {
 	gameState.Player = player
 
 	// 2. Load Room State — supports both a single room object and an array of rooms
-	roomData, err := os.ReadFile(roomPath)
+	roomData, err := os.ReadFile(filepath.Join(scenarioDir, "room_state.json"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read room state file: %w", err)
 	}
 
-	// Try array format first
 	var rawRooms []rawRoomState
-	if err := json.Unmarshal(roomData, &rawRooms); err == nil {
-		for _, rr := range rawRooms {
-			room := &RoomState{
-				RoomID:      rr.RoomID,
-				Name:        rr.Name,
-				Description: rr.Description,
-				Image:       rr.Image,
-				Items:       make(map[string]*RoomItem),
-			}
-			itemOrder, _ := unmarshalItemsOrdered(rr.Items, room.Items)
-			room.ItemOrder = itemOrder
-			gameState.Rooms[room.RoomID] = room
-			gameState.RoomOrder = append(gameState.RoomOrder, room.RoomID)
+	if err := json.Unmarshal(roomData, &rawRooms); err != nil {
+		var single rawRoomState
+		if err := json.Unmarshal(roomData, &single); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal room state: %w", err)
 		}
-		markStartingRoomVisited(gameState)
-		return gameState, nil
+		rawRooms = []rawRoomState{single}
 	}
-
-	// Fallback: single room object
-	var rawRoom rawRoomState
-	if err := json.Unmarshal(roomData, &rawRoom); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal room state: %w", err)
+	for _, rr := range rawRooms {
+		room := &RoomState{
+			RoomID:      rr.RoomID,
+			Name:        rr.Name,
+			Description: rr.Description,
+			Image:       rr.Image,
+			Items:       make(map[string]*RoomItem),
+			Exits:       rr.Exits,
+		}
+		itemOrder, err := unmarshalItemsOrdered(rr.Items, room.Items)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal items for room %s: %w", rr.RoomID, err)
+		}
+		room.ItemOrder = itemOrder
+		gameState.Rooms[room.RoomID] = room
+		gameState.RoomOrder = append(gameState.RoomOrder, room.RoomID)
 	}
-	room := &RoomState{
-		RoomID:      rawRoom.RoomID,
-		Name:        rawRoom.Name,
-		Description: rawRoom.Description,
-		Image:       rawRoom.Image,
-		Items:       make(map[string]*RoomItem),
+	if err := checkExits(gameState); err != nil {
+		return nil, err
 	}
-	itemOrder, _ := unmarshalItemsOrdered(rawRoom.Items, room.Items)
-	room.ItemOrder = itemOrder
-	gameState.Rooms[room.RoomID] = room
-	gameState.RoomOrder = []string{room.RoomID}
 
 	markStartingRoomVisited(gameState)
 	return gameState, nil
+}
+
+// checkExits rejects exits to unknown rooms or through unknown doors: a typo
+// there would silently make a room unreachable or remove a lock.
+func checkExits(gs *GameState) error {
+	for _, room := range gs.Rooms {
+		for to, door := range room.Exits {
+			if _, ok := gs.Rooms[to]; !ok {
+				return fmt.Errorf("room %s: exit to unknown room %q", room.RoomID, to)
+			}
+			if _, ok := room.Items[door]; door != "" && !ok {
+				return fmt.Errorf("room %s: exit to %s uses unknown door %q", room.RoomID, to, door)
+			}
+		}
+	}
+	return nil
 }
 
 // markStartingRoomVisited marks the player's current room as visited.
@@ -90,14 +107,8 @@ func markStartingRoomVisited(gs *GameState) {
 // unmarshalItemsOrdered decodes a JSON object of items into the provided map
 // while preserving the declaration order of keys. Returns the ordered list of item IDs.
 func unmarshalItemsOrdered(raw json.RawMessage, items map[string]*RoomItem) ([]string, error) {
-	// First decode as a map of raw messages to get the keys
-	var rawItems map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &rawItems); err != nil {
-		return nil, err
-	}
-
 	// Use json.Decoder to get key order
-	dec := json.NewDecoder(newByteReader(raw))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	// Read opening brace
 	tok, err := dec.Token()
 	if err != nil {
@@ -129,23 +140,4 @@ func unmarshalItemsOrdered(raw json.RawMessage, items map[string]*RoomItem) ([]s
 	}
 
 	return order, nil
-}
-
-// newByteReader wraps a byte slice in a strings.Reader-like reader.
-func newByteReader(raw json.RawMessage) *bytesReader {
-	return &bytesReader{data: raw}
-}
-
-type bytesReader struct {
-	data []byte
-	pos  int
-}
-
-func (r *bytesReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.data) {
-		return 0, fmt.Errorf("EOF")
-	}
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
 }

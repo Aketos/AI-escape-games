@@ -230,3 +230,87 @@ func TestRewriteMessagesFirstTurn(t *testing.T) {
 		t.Errorf("conversation history mangled: %d messages", len(later))
 	}
 }
+
+// TestProxyTextToolCallNotSpoken covers models (e.g. Gemma) that write a tool
+// call as text: it must run on the engine but never reach the TTS stream.
+func TestProxyTextToolCallNotSpoken(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls == 1 {
+			// Split mid-call, as streaming does.
+			fmt.Fprint(w, sseChunk(`Voyons le sol. inspect_item({"target_`))
+			fmt.Fprint(w, sseChunk(`item":"zone_sol"})`))
+		} else {
+			fmt.Fprint(w, sseChunk("Rien d'utile."))
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	state := game.NewGameState()
+	state.Player.CurrentRoom = "lab"
+	state.Rooms["lab"] = &game.RoomState{RoomID: "lab", Name: "Lab", Items: map[string]*game.RoomItem{
+		"zone_sol": {Name: "Le sol", Visible: true},
+	}}
+	p := &LLMProxy{
+		Engine:      game.NewGameEngine(state),
+		UpstreamURL: upstream.URL,
+		httpClient:  upstream.Client(),
+		config:      &GameConfig{Persona: "test persona", IntroDirective: "test intro"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"stream": true, "messages": [{"role": "user", "content": "je regarde le sol"}]}`))
+	rec := httptest.NewRecorder()
+	p.HandleChatCompletions(rec, req)
+
+	out := rec.Body.String()
+	if !state.Rooms["lab"].Items["zone_sol"].Inspected {
+		t.Error("text tool call was not executed")
+	}
+	if strings.Contains(out, "inspect_item") || strings.Contains(out, "target_") {
+		t.Errorf("tool call text reached the TTS stream:\n%s", out)
+	}
+	if !strings.Contains(out, "Voyons le sol.") || !strings.Contains(out, "Rien d'utile.") {
+		t.Errorf("narration missing from stream:\n%s", out)
+	}
+}
+
+// TestProxyRequiresToken: with LLM_PROXY_TOKEN set, strangers get 401 and
+// the upstream LLM is never called.
+func TestProxyRequiresToken(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream LLM called without a valid token")
+	}))
+	defer upstream.Close()
+
+	p := &LLMProxy{Engine: game.NewGameEngine(game.NewGameState()), UpstreamURL: upstream.URL, httpClient: upstream.Client(), token: "s3cret"}
+	body := `{"stream": true, "messages": [{"role": "user", "content": "x"}]}`
+	for name, header := range map[string]string{"no header": "", "wrong token": "Bearer nope"} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		if header != "" {
+			req.Header.Set("Authorization", header)
+		}
+		rec := httptest.NewRecorder()
+		p.HandleChatCompletions(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: got %d, want 401", name, rec.Code)
+		}
+		rec = httptest.NewRecorder()
+		p.HandleSimulationChat(rec, httptest.NewRequest(http.MethodPost, "/api/simulate", strings.NewReader(`{"init": true}`)))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("simulate %s: got %d, want 401", name, rec.Code)
+		}
+	}
+}
+
+// TestLoadGameConfigRejectsPaths: the scenario name comes from the URL.
+func TestLoadGameConfigRejectsPaths(t *testing.T) {
+	for _, name := range []string{"", ".", "..", "../en/projet_longevite", "a/b", "/etc"} {
+		if _, err := LoadGameConfig(name); err == nil || !strings.Contains(err.Error(), "invalid scenario") {
+			t.Errorf("LoadGameConfig(%q) = %v, want invalid scenario error", name, err)
+		}
+	}
+}

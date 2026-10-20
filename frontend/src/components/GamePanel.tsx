@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Backpack, Eye, Search, ChevronRight, Package, Clock, Trophy, CheckCircle2 } from 'lucide-react';
 import type { GameState, GameRoom, GameItem } from '../hooks/useGameState';
-import { itemImage } from '../utils/imagePath';
+import { scenarioImage } from '../utils/imagePath';
 
 interface Props {
   state: GameState | null;
@@ -27,25 +27,7 @@ export function GamePanel({ state, onItemClick, onRoomClick }: Props) {
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      {/* Oxygen & Victory */}
-      <div className="flex items-center gap-3">
-        <div className={`flex items-center gap-2 px-3 py-1.5 border rounded font-mono text-xs tracking-wider ${
-          state.oxygen <= 10
-            ? 'border-[#ff3333] text-[#ff3333] animate-pulse'
-            : state.oxygen <= 20
-            ? 'border-yellow-500 text-yellow-500'
-            : 'border-[#00ffcc] text-[#00ffcc]'
-        }`}>
-          <Clock className="w-3.5 h-3.5" />
-          O₂: {state.oxygen}min
-        </div>
-        {state.won && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border border-[#ff00ff] text-[#ff00ff] rounded font-mono text-xs tracking-wider">
-            <Trophy className="w-3.5 h-3.5" />
-            ESCAPED
-          </div>
-        )}
-      </div>
+      <StatusBadges state={state} />
 
       {/* Rooms Map */}
       <div>
@@ -85,25 +67,7 @@ export function InventoryPanel({ state, scenario, onItemClick }: Props) {
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      {/* Oxygen & Victory */}
-      <div className="flex items-center gap-3">
-        <div className={`flex items-center gap-2 px-3 py-1.5 border rounded font-mono text-xs tracking-wider ${
-          state.oxygen <= 10
-            ? 'border-[#ff3333] text-[#ff3333] animate-pulse'
-            : state.oxygen <= 20
-            ? 'border-yellow-500 text-yellow-500'
-            : 'border-[#00ffcc] text-[#00ffcc]'
-        }`}>
-          <Clock className="w-3.5 h-3.5" />
-          O₂: {state.oxygen}min
-        </div>
-        {state.won && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border border-[#ff00ff] text-[#ff00ff] rounded font-mono text-xs tracking-wider">
-            <Trophy className="w-3.5 h-3.5" />
-            ESCAPED
-          </div>
-        )}
-      </div>
+      <StatusBadges state={state} />
 
       {/* Inventory */}
       <div>
@@ -116,7 +80,7 @@ export function InventoryPanel({ state, scenario, onItemClick }: Props) {
         ) : (
           <div className="flex flex-col gap-1.5">
             {state.inventory.map(item => {
-              const img = itemImage(scenario ?? null, item.image);
+              const img = scenarioImage(scenario ?? null, item.image);
               return (
               <div
                 key={item.id}
@@ -138,6 +102,30 @@ export function InventoryPanel({ state, scenario, onItemClick }: Props) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Oxygen & Victory
+function StatusBadges({ state }: { state: GameState }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className={`flex items-center gap-2 px-3 py-1.5 border rounded font-mono text-xs tracking-wider ${
+        state.oxygen <= 10
+          ? 'border-[#ff3333] text-[#ff3333] animate-pulse'
+          : state.oxygen <= 20
+          ? 'border-yellow-500 text-yellow-500'
+          : 'border-[#00ffcc] text-[#00ffcc]'
+      }`}>
+        <Clock className="w-3.5 h-3.5" />
+        O₂: {state.oxygen}min
+      </div>
+      {state.won && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border border-[#ff00ff] text-[#ff00ff] rounded font-mono text-xs tracking-wider">
+          <Trophy className="w-3.5 h-3.5" />
+          ESCAPED
+        </div>
+      )}
     </div>
   );
 }

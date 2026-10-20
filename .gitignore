@@ -1,2 +1,8 @@
 # Secrets and local configuration
 secrets.mk
+
+# Dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+/server

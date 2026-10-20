@@ -11,7 +11,9 @@
             "description": "L'ID de l'objet dans la pièce (ex: 'zone_bureau', 'blouse_scientifique', 'mur_metallique'). Choisis l'objet dont le nom correspond le mieux à ce que le joueur a dit, même si la formulation est différente."
           }
         },
-        "required": ["target_item"]
+        "required": [
+          "target_item"
+        ]
       }
     },
     {
@@ -25,7 +27,9 @@
             "description": "L'ID de l'objet à prendre (ex: 'fiole_uv'). Choisis l'objet dont le nom correspond le mieux à ce que le joueur a dit."
           }
         },
-        "required": ["target_item"]
+        "required": [
+          "target_item"
+        ]
       }
     },
     {
@@ -43,12 +47,15 @@
             "description": "L'ID de l'objet cible dans la pièce (ex: 'mur_metallique'). Choisis l'objet dont le nom correspond le mieux à ce que le joueur a dit."
           }
         },
-        "required": ["inventory_item", "target_item"]
+        "required": [
+          "inventory_item",
+          "target_item"
+        ]
       }
     },
     {
       "name": "go_to",
-      "description": "OBLIGATOIRE quand le joueur veut se déplacer, aller, passer vers une autre pièce ou zone. Appelle cette fonction avec l'ID de la salle de destination. Le déplacement n'est possible que si un passage est déverrouillé.",
+      "description": "OBLIGATOIRE quand le joueur veut se déplacer, aller, passer vers une autre pièce ou zone. Appelle cette fonction avec l'ID de la salle de destination (voir 'Passages accessibles'). Si le passage est verrouillé ou n'existe pas, le moteur le dira : raconte sa réponse.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -57,7 +64,9 @@
             "description": "L'ID de la salle de destination (ex: 'corridor_a', 'medical_lab'). Fais correspondre la description du joueur au nom de la salle la plus pertinente."
           }
         },
-        "required": ["target_room"]
+        "required": [
+          "target_room"
+        ]
       }
     },
     {
@@ -71,7 +80,9 @@
             "description": "Le code à 4 chiffres dit par le joueur."
           }
         },
-        "required": ["pin_code"]
+        "required": [
+          "pin_code"
+        ]
       }
     }
   ]

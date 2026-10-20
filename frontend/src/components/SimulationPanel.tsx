@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, RotateCcw, MessageSquare } from 'lucide-react';
 import type { GameState } from '../hooks/useGameState';
 import { GamePanel, InventoryPanel } from './GamePanel';
-import { roomImage } from '../utils/imagePath';
+import { scenarioImage } from '../utils/imagePath';
 
 interface SimulationPanelProps {
   messages: { role: 'user' | 'ai'; content: string }[];
@@ -78,7 +78,7 @@ export function SimulationPanel({
   };
 
   const currentRoom = gameState?.rooms.find(r => r.current);
-  const bgImage = roomImage(scenario, currentRoom?.image);
+  const bgImage = scenarioImage(scenario, currentRoom?.image);
 
   return (
     <div className="min-h-screen relative flex flex-col">
@@ -129,7 +129,7 @@ export function SimulationPanel({
         >
           {messages.length === 0 && (
             <div className="text-gray-600 italic text-sm font-mono text-center mt-8">
-              Décrivez votre action à CHRONOS. Ex: "J'examine le sol" ou "J'utilise la fiole sur le mur".
+              Type what you do, e.g. "I examine the room" or "I use the vial on the wall".
             </div>
           )}
           {messages.map((msg, i) => (
@@ -142,7 +142,7 @@ export function SimulationPanel({
               }`}
             >
               <div className="text-xs opacity-50 mb-1">
-                {msg.role === 'user' ? 'JOUEUR' : 'CHRONOS'}
+                {msg.role === 'user' ? 'PLAYER' : 'GAME MASTER'}
               </div>
               {msg.content}
             </div>
@@ -150,7 +150,7 @@ export function SimulationPanel({
           {loading && (
             <div className="self-start bg-gray-900/80 border border-gray-700 p-3 rounded text-sm font-mono text-gray-400 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>CHRONOS traite votre demande...</span>
+              <span>The game master is thinking...</span>
             </div>
           )}
           {error && (
@@ -168,7 +168,7 @@ export function SimulationPanel({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={loading}
-            placeholder="Tapez votre action..."
+            placeholder="Type your action..."
             className="flex-1 bg-black/50 border border-gray-700 text-gray-200 font-mono text-sm px-3 py-2 rounded focus:outline-none focus:border-[#00ffcc] disabled:opacity-50"
           />
           <button
