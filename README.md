@@ -122,37 +122,47 @@ escape-game/
 ├── cmd/server/main.go          # Entry point — HTTP server, endpoints, wiring
 ├── internal/
 │   ├── ai/
-│   │   ├── gameconfig.go       # Scenario config loading + ListScenarios
-│   │   ├── llmproxy.go         # OpenAI-compatible proxy, tool call dispatch
-│   │   ├── llmproxy_test.go    # Unit tests
-│   │   └── unmute.go           # Unmute WebSocket client (audio bridge)
-│   ├── game/
+│   │   ├── gameconfig.go       # Scenario text files (persona, intro) + ListScenarios
+│   │   ├── llmproxy.go         # OpenAI-compatible proxy: prompt, tool loop, streaming; owns the loaded scenario
+│   │   ├── textcalls.go        # Tool calls a model writes as text: parse and strip
+│   │   ├── simulate.go         # POST /api/simulate (text-only game)
+│   │   ├── unmute.go           # Unmute WebSocket client (audio bridge)
+│   │   └── *_test.go
+│   ├── game/                   # No dependencies on the other packages
 │   │   ├── state.go            # Game state structs (RoomState, PlayerState, etc.)
-│   │   ├── evaluator.go        # Game engine — action handlers, FSM logic
-│   │   └── scenario.go         # JSON scenario loader
+│   │   ├── evaluator.go        # Game engine: tool dispatch, action handlers
+│   │   ├── match.go            # Fuzzy matching of spoken references to items and rooms
+│   │   ├── views.go            # Game state for the LLM prompt and for the frontend
+│   │   ├── text.go             # Engine sentences per language (fr, en)
+│   │   ├── loader.go           # JSON scenario loader
+│   │   └── evaluator_test.go   # Full playthrough in every language + rules parity
 │   └── network/
-│       └── websocket.go        # WebSocket server, scenario reload, SFX broadcast
+│       ├── websocket.go        # WebSocket server: one player, fresh game per connection
+│       └── websocket_test.go
 ├── config/
 │   ├── fr/
 │   │   └── projet_longevite/   # Default French scenario
 │   │       ├── scenario.json       # Metadata (name, description, difficulty)
 │   │       ├── persona.txt         # AI persona (system prompt base)
 │   │       ├── intro_directive.txt # First-turn directive
-│   │       ├── intro_prompt.txt    # Hidden TTS intro prompt
+│   │       ├── intro_prompt.txt    # First message in simulation mode
 │   │       ├── room_state.json     # Room layout, items, puzzles
 │   │       ├── player_state.json   # Initial player state
 │   │       └── function_calls.json # LLM tool definitions
 │   └── en/
-│       └── projet_longevite/   # English version
+│       └── projet_longevite/   # English translation (same IDs and rules)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx             # Main UI — scenario picker, visualizer, panels, logs
 │   │   ├── hooks/
-│   │   │   ├── useAudioStream.ts   # WebSocket audio streaming + SFX playback
-│   │   │   └── useGameState.ts     # Game state management
-│   │   └── components/
-│   │       ├── AudioVisualizer.tsx
-│   │       └── GamePanel.tsx
+│   │   │   ├── useAudioStream.ts   # WebSocket audio streaming
+│   │   │   ├── useGameState.ts     # Game state types + state
+│   │   │   └── useSimulation.ts    # Simulation mode client
+│   │   ├── components/
+│   │   │   ├── AudioVisualizer.tsx
+│   │   │   ├── GamePanel.tsx
+│   │   │   └── SimulationPanel.tsx
+│   │   └── utils/                  # Image paths, SFX playback
 │   ├── public/sounds/
 │   │   ├── ambient_drone.opus      # Shared ambient background
 │   │   └── projet_longevite/       # Per-scenario SFX (.opus files)
@@ -177,22 +187,32 @@ Each scenario lives in `config/<lang>/<scenario_id>/` and contains:
 | `scenario.json` | Display metadata: `name`, `description`, `difficulty` (`easy`/`medium`/`hard`) |
 | `persona.txt` | AI persona — the base system prompt defining the game master's character |
 | `intro_directive.txt` | Appended to the system prompt on the first turn (sets the scene) |
-| `intro_prompt.txt` | Hidden prompt sent to the TTS engine for the cinematic intro |
-| `room_state.json` | Room layout with interactive items, puzzles, states, and SFX triggers |
+| `intro_prompt.txt` | First user message in simulation mode (voice mode starts from the intro directive alone) |
+| `room_state.json` | Rooms with interactive items, puzzles, states, SFX triggers, and `exits` |
 | `player_state.json` | Initial player state (current room, inventory, history) |
-| `function_calls.json` | LLM tool definitions (`inspect_item`, `take_item`, `use_item`, `input_pin_code`) |
+| `function_calls.json` | LLM tool definitions (`inspect_item`, `take_item`, `use_item`, `input_pin_code`, `go_to`) |
+
+Each room lists the rooms reachable from it in `exits`, mapping a room ID to the door item that guards the way
+(`""` for an always-open passage). `go_to` only follows exits, and a door in state `locked` blocks it, even while
+hidden. On `use_item`, the inventory item is removed only when the target has `consumes_item: true`.
+
+Each language directory holds a translation of the same scenario: identical IDs, states, requirements and exits,
+only the text differs (`TestLanguagesShareRules` fails otherwise). To add a language, add `config/<lang>/` and an
+entry for it in `internal/game/text.go`.
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GAME_LANGUAGE` | `fr` | Language directory under `config/` |
+| `PORT` | `8080` | HTTP port (Scaleway sets it) |
+| `GAME_LANGUAGE` | `fr` | `fr` or `en`: the `config/` directory and the language of the engine's replies |
 | `CONFIG_DIR` | `config` | Root config directory path |
 | `LLM_UPSTREAM_URL` | `https://api.scaleway.ai/v1` | Upstream LLM API URL |
-| `LLM_MODEL` | `gemma-3-27b-it` | LLM model name |
+| `LLM_MODEL` | `mistral-small-3.2-24b-instruct-2506` | LLM model name (`make deploy-backend` sets `gemma-3-27b-it`) |
 | `LLM_API_KEY` | — | API key for the upstream LLM |
+| `LLM_PROXY_TOKEN` | — | Bearer token required on `/chat/completions` and `/api/simulate`. Unmute sends it as `KYUTAI_LLM_API_KEY`; the simulation UI asks for it. Unset = open (local dev only); `make deploy-backend` refuses to deploy without it |
 | `UNMUTE_WS_URL` | — | Unmute WebSocket URL for STT/TTS |
-| `UNMUTE_VOICE` | `cml-tts/fr/...enhanced.wav` | TTS voice path |
+| `UNMUTE_VOICE` | `cml-tts/fr/...enhanced.wav` | TTS voice path (French by default: set an English voice with `GAME_LANGUAGE=en`) |
 
 ### Secrets
 
@@ -213,9 +233,13 @@ cp secrets.mk.example secrets.mk
 | `/ws` | WS | WebSocket connection (accepts `?scenario=<id>` query param) |
 | `/chat/completions` | POST | OpenAI-compatible chat completions (used by Unmute) |
 | `/v1/chat/completions` | POST | Alias for the above |
+| `/api/simulate` | POST | Text-only simulation (own game, separate from the voice game; needs `LLM_PROXY_TOKEN`) |
 | `/models` | GET | List available LLM models |
 | `/game-state` | GET | Current game state (rooms, inventory, oxygen) |
-| `/debug` | GET | Debug info (tools loaded, config status) |
+| `/debug` | GET | Debug info (scenario, tools loaded) |
+
+One server runs one voice game at a time: Unmute's LLM calls carry no session ID. A second visitor is told a game is in
+progress, every new connection starts a fresh game, and the backend is deployed with `max-scale=1`.
 
 ---
 
@@ -248,7 +272,7 @@ npm install
 npm run dev
 ```
 
-The frontend dev server proxies `/ws`, `/scenarios`, and `/game-state` to the backend.
+The frontend dev server proxies `/ws`, `/scenarios`, `/game-state` and `/api` to the backend.
 
 ### Creating a New Scenario
 
@@ -269,8 +293,9 @@ Edit the generated files to define your scenario's persona, rooms, puzzles, and 
 ### Running Tests
 
 ```bash
-go build ./...
-go test ./internal/... -count=1
+go vet ./cmd/... ./internal/...
+go test ./internal/... -count=1 -race
+cd frontend && npm run lint && npx tsc -b --noEmit
 ```
 
 ---
@@ -356,7 +381,8 @@ The AI game master stays in character and redirects off-topic player input back 
 
 ### Oxygen Timer
 
-Scenarios can define a countdown timer (e.g. 45 minutes of oxygen) to create urgency. The LLM is instructed to remind the player of remaining time with increasing urgency.
+The engine counts down 45 minutes of oxygen from the start of each game (fixed in `internal/game/evaluator.go`, not per
+scenario). The remaining time is shown in the UI and given to the LLM each turn; nothing happens when it reaches zero.
 
 ---
 

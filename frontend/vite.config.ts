@@ -10,6 +10,9 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
+      '/scenarios': 'http://localhost:8080',
+      '/game-state': 'http://localhost:8080',
+      '/api': 'http://localhost:8080',
     },
   },
 })

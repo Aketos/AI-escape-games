@@ -3,14 +3,19 @@ package ai
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"escape-game/internal/game"
@@ -22,13 +27,17 @@ import (
 // calling with the upstream LLM.
 //
 // Per turn it:
-//  1. Rewrites the system prompt with the CHRONOS persona + live game state.
+//  1. Rewrites the system prompt with the scenario persona + live game state.
 //  2. Sends tool definitions alongside the messages to the upstream LLM.
 //  3. Streams the upstream LLM response to Unmute (narration only).
 //  4. When the LLM emits a tool_call, executes it on the GameEngine, then
-//     feeds the result back as a tool role message so CHRONOS narrates
-//     the outcome in the same spoken reply.
+//     feeds the result back as a tool role message so the game master
+//     narrates the outcome in the same spoken reply.
+//
+// The proxy also owns the loaded scenario (LoadScenario). Text-written tool
+// calls are handled in textcalls.go, the simulation endpoint in simulate.go.
 type LLMProxy struct {
+	mu                sync.Mutex
 	Engine            *game.GameEngine
 	UpstreamURL       string // OpenAI-compatible base URL, e.g. https://api.scaleway.ai/v1
 	Model             string
@@ -36,12 +45,19 @@ type LLMProxy struct {
 	OnSFX             func(sfx string) // called when a game action triggers a sound effect
 	OnGameStateChange func()           // called after a tool call mutates game state
 	httpClient        *http.Client
+	token             string // LLM_PROXY_TOKEN callers must send as Bearer; empty = open (local dev)
+	scenario          string
 	tools             []map[string]interface{}
 	config            *GameConfig
+	simHistory        []ChatMessage // conversation of the simulation mode, see simulate.go
 }
 
 // maxActionRounds limits LLM continuation calls within a single response.
 const maxActionRounds = 4
+
+// maxRequestBytes bounds request bodies: Unmute sends the whole conversation,
+// which stays far below this over a 45-minute game.
+const maxRequestBytes = 4 << 20
 
 type ChatMessage struct {
 	Role       string          `json:"role"`
@@ -51,17 +67,19 @@ type ChatMessage struct {
 }
 
 type toolCallChunk struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function toolFunction `json:"function"`
 }
 
-// NewLLMProxyFromEnv builds the proxy from environment variables.
-// scenario selects the game scenario (config subdirectory).
-func NewLLMProxyFromEnv(engine *game.GameEngine, scenario string, onSFX func(string), onGameStateChange func()) (*LLMProxy, error) {
+type toolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// NewLLMProxyFromEnv builds the proxy and its own game engine from
+// environment variables, then loads scenario (a config subdirectory).
+func NewLLMProxyFromEnv(scenario string, onSFX func(string), onGameStateChange func()) (*LLMProxy, error) {
 	upstream := os.Getenv("LLM_UPSTREAM_URL")
 	if upstream == "" {
 		upstream = "https://api.scaleway.ai/v1"
@@ -77,70 +95,101 @@ func NewLLMProxyFromEnv(engine *game.GameEngine, scenario string, onSFX func(str
 	if apiKey == "" {
 		log.Println("WARNING: no LLM_API_KEY or SCALEWAY_MOSHI_API_KEY set; LLM proxy calls will fail")
 	}
-
-	cfg, err := LoadGameConfig(scenario)
-	if err != nil {
-		return nil, fmt.Errorf("game config: %w", err)
+	token := os.Getenv("LLM_PROXY_TOKEN")
+	if token == "" {
+		log.Println("WARNING: LLM_PROXY_TOKEN is not set; /chat/completions and /api/simulate are open to anyone")
 	}
 
-	tools := loadTools(cfg.ScenarioDir)
-
-	return &LLMProxy{
-		Engine:            engine,
+	p := &LLMProxy{
+		Engine:            game.NewGameEngine(game.NewGameState()),
 		UpstreamURL:       strings.TrimRight(upstream, "/"),
 		Model:             model,
 		APIKey:            apiKey,
 		OnSFX:             onSFX,
 		OnGameStateChange: onGameStateChange,
 		httpClient:        &http.Client{Timeout: 120 * time.Second},
-		tools:             tools,
-		config:            cfg,
-	}, nil
+		token:             token,
+	}
+	if err := p.LoadScenario(scenario); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
-// UpdateConfig replaces the game config and reloads tools. Used when the
-// player selects a different scenario mid-session.
-func (p *LLMProxy) UpdateConfig(cfg *GameConfig) {
-	p.tools = loadTools(cfg.ScenarioDir)
-	p.config = cfg
+// LoadScenario (re)starts a fresh game of scenario: config, tools, rooms,
+// player state and oxygen timer. It is the only place a scenario is loaded.
+func (p *LLMProxy) LoadScenario(scenario string) error {
+	cfg, err := LoadGameConfig(scenario)
+	if err != nil {
+		return err
+	}
+	state, err := game.LoadScenario(cfg.ScenarioDir, cfg.Lang)
+	if err != nil {
+		return fmt.Errorf("failed to load scenario %q: %w", scenario, err)
+	}
+	tools, err := loadTools(cfg.ScenarioDir)
+	if err != nil {
+		return fmt.Errorf("failed to load tools of scenario %q: %w", scenario, err)
+	}
+
+	p.mu.Lock()
+	p.scenario, p.config, p.tools, p.simHistory = scenario, cfg, tools, nil
+	p.mu.Unlock()
+	p.Engine.ReloadState(state)
+	return nil
+}
+
+// Scenario returns the ID of the loaded scenario.
+func (p *LLMProxy) Scenario() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.scenario
+}
+
+// ToolsCount returns the number of loaded tool definitions (for debugging).
+func (p *LLMProxy) ToolsCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.tools)
+}
+
+// authorized checks the caller's Bearer token against LLM_PROXY_TOKEN.
+// Unmute sends it from its KYUTAI_LLM_API_KEY setting.
+func (p *LLMProxy) authorized(r *http.Request) bool {
+	if p.token == "" {
+		return true
+	}
+	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return subtle.ConstantTimeCompare([]byte(got), []byte(p.token)) == 1
+}
+
+// writeError sends {"error": msg} with the given status.
+func writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // loadTools reads function definitions from function_calls.json and formats
 // them as OpenAI tool definitions. The JSON file stores tools in a flat
 // format (name/description/parameters at the top level); the OpenAI API
 // requires them wrapped as {"type":"function","function":{...}}.
-func loadTools(langDir string) []map[string]interface{} {
+func loadTools(scenarioDir string) ([]map[string]interface{}, error) {
 	var toolsConfig struct {
 		Tools []map[string]interface{} `json:"tools"`
 	}
-	path := filepath.Join(langDir, "function_calls.json")
-	fileData, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(scenarioDir, "function_calls.json"))
 	if err != nil {
-		log.Printf("Warning: could not read %s: %v", path, err)
-		return nil
+		return nil, err
 	}
-	if err := json.Unmarshal(fileData, &toolsConfig); err != nil {
-		log.Printf("Error parsing %s: %v", path, err)
-		return nil
+	if err := json.Unmarshal(data, &toolsConfig); err != nil {
+		return nil, fmt.Errorf("function_calls.json: %w", err)
 	}
 	formatted := make([]map[string]interface{}, 0, len(toolsConfig.Tools))
 	for _, t := range toolsConfig.Tools {
-		fn := map[string]interface{}{}
-		for k, v := range t {
-			fn[k] = v
-		}
-		formatted = append(formatted, map[string]interface{}{
-			"type":     "function",
-			"function": fn,
-		})
+		formatted = append(formatted, map[string]interface{}{"type": "function", "function": t})
 	}
-	log.Printf("%d tools loaded from %s", len(formatted), path)
-	return formatted
-}
-
-// ToolsCount returns the number of loaded tool definitions (for debugging).
-func (p *LLMProxy) ToolsCount() int {
-	return len(p.tools)
+	return formatted, nil
 }
 
 func (p *LLMProxy) HandleModels(w http.ResponseWriter, r *http.Request) {
@@ -155,18 +204,20 @@ func (p *LLMProxy) HandleModels(w http.ResponseWriter, r *http.Request) {
 
 // HandleChatCompletions implements POST /v1/chat/completions.
 func (p *LLMProxy) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	log.Println("LLMProxy: Received POST /chat/completions from Unmute!")
+	if !p.authorized(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var req struct {
 		Stream   bool          `json:"stream"`
 		Messages []ChatMessage `json:"messages"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "bad request: %v"}`, err), http.StatusBadRequest)
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request: "+err.Error())
 		return
 	}
 
 	messages := p.rewriteMessages(req.Messages)
-
 	if req.Stream {
 		p.streamCompletion(w, r, messages)
 	} else {
@@ -174,10 +225,9 @@ func (p *LLMProxy) HandleChatCompletions(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// rewriteMessages replaces Unmute's system prompt with the CHRONOS persona,
+// rewriteMessages replaces Unmute's system prompt with the scenario persona,
 // the intro directive on the first turn, and a live game state snapshot.
 func (p *LLMProxy) rewriteMessages(incoming []ChatMessage) []ChatMessage {
-	log.Println("LLMProxy: rewriteMessages called - rewriting system prompt with CHRONOS persona")
 	firstTurn := true
 	rest := make([]ChatMessage, 0, len(incoming))
 	for _, m := range incoming {
@@ -190,13 +240,18 @@ func (p *LLMProxy) rewriteMessages(incoming []ChatMessage) []ChatMessage {
 		rest = append(rest, m)
 	}
 
+	p.mu.Lock()
+	persona := p.config.Persona
+	introDirective := p.config.IntroDirective
+	p.mu.Unlock()
+
 	var sys strings.Builder
-	sys.WriteString(p.config.Persona)
+	sys.WriteString(persona)
 	if firstTurn {
 		sys.WriteString("\n\n")
-		sys.WriteString(p.config.IntroDirective)
+		sys.WriteString(introDirective)
 	}
-	sys.WriteString("\n\n# ÉTAT ACTUEL DU JEU (SOURCE DE VÉRITÉ ABSOLUE)\n")
+	sys.WriteString("\n\n")
 	sys.WriteString(p.Engine.StateSnapshot())
 
 	return append([]ChatMessage{{Role: "system", Content: sys.String()}}, rest...)
@@ -204,14 +259,19 @@ func (p *LLMProxy) rewriteMessages(incoming []ChatMessage) []ChatMessage {
 
 // callUpstream starts a streaming chat completion against the real LLM.
 // Tool definitions are included so the LLM can use native function calling.
-func (p *LLMProxy) callUpstream(messages []ChatMessage) (*http.Response, error) {
+// ctx is the caller's request: when the player interrupts, the call stops.
+func (p *LLMProxy) callUpstream(ctx context.Context, messages []ChatMessage) (*http.Response, error) {
+	p.mu.Lock()
+	tools := p.tools
+	p.mu.Unlock()
+
 	body := map[string]interface{}{
 		"model":    p.Model,
 		"messages": messages,
 		"stream":   true,
 	}
-	if len(p.tools) > 0 {
-		body["tools"] = p.tools
+	if len(tools) > 0 {
+		body["tools"] = tools
 		body["tool_choice"] = "auto"
 	}
 
@@ -220,7 +280,7 @@ func (p *LLMProxy) callUpstream(messages []ChatMessage) (*http.Response, error) 
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, p.UpstreamURL+"/chat/completions", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.UpstreamURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -239,19 +299,15 @@ func (p *LLMProxy) callUpstream(messages []ChatMessage) (*http.Response, error) 
 	return resp, nil
 }
 
-// executeToolCall runs a native tool call on the game engine and returns the
-// JSON result string to feed back to the LLM as a tool role message.
-func (p *LLMProxy) executeToolCall(name, argumentsJSON string) string {
+// executeToolCall runs a tool call on the game engine. It returns the JSON
+// result to feed back to the LLM and the sound effect the action fired.
+func (p *LLMProxy) executeToolCall(name, argumentsJSON string) (resultJSON, sfx string) {
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
 		log.Printf("Failed to parse tool call arguments %q: %v", argumentsJSON, err)
-		args = make(map[string]interface{})
 	}
 
-	resultJSON, sfx := p.Engine.ProcessLLMFunctionCall(game.FunctionCall{
-		Name:      name,
-		Arguments: args,
-	})
+	resultJSON, sfx = p.Engine.ProcessLLMFunctionCall(game.FunctionCall{Name: name, Arguments: args})
 	log.Printf("LLM proxy executed tool %s(%s) => %s (sfx=%q)", name, argumentsJSON, resultJSON, sfx)
 
 	if sfx != "" && p.OnSFX != nil {
@@ -260,8 +316,7 @@ func (p *LLMProxy) executeToolCall(name, argumentsJSON string) string {
 	if p.OnGameStateChange != nil {
 		p.OnGameStateChange()
 	}
-
-	return resultJSON
+	return resultJSON, sfx
 }
 
 // sseEmitter writes OpenAI-compatible streaming chunks.
@@ -273,36 +328,29 @@ type sseEmitter struct {
 	model   string
 }
 
-func (e *sseEmitter) emitContent(content string) {
-	if content == "" {
-		return
-	}
-	chunk := map[string]interface{}{
+func (e *sseEmitter) write(delta map[string]string, finishReason interface{}) {
+	data, _ := json.Marshal(map[string]interface{}{
 		"id":      e.id,
 		"object":  "chat.completion.chunk",
 		"created": e.created,
 		"model":   e.model,
 		"choices": []map[string]interface{}{
-			{"index": 0, "delta": map[string]string{"content": content}, "finish_reason": nil},
+			{"index": 0, "delta": delta, "finish_reason": finishReason},
 		},
-	}
-	data, _ := json.Marshal(chunk)
+	})
 	fmt.Fprintf(e.w, "data: %s\n\n", data)
 	e.flusher.Flush()
 }
 
-func (e *sseEmitter) emitDone() {
-	chunk := map[string]interface{}{
-		"id":      e.id,
-		"object":  "chat.completion.chunk",
-		"created": e.created,
-		"model":   e.model,
-		"choices": []map[string]interface{}{
-			{"index": 0, "delta": map[string]string{}, "finish_reason": "stop"},
-		},
+func (e *sseEmitter) emitContent(content string) {
+	if content != "" {
+		e.write(map[string]string{"content": content}, nil)
 	}
-	data, _ := json.Marshal(chunk)
-	fmt.Fprintf(e.w, "data: %s\n\ndata: [DONE]\n\n", data)
+}
+
+func (e *sseEmitter) emitDone() {
+	e.write(map[string]string{}, "stop")
+	fmt.Fprint(e.w, "data: [DONE]\n\n")
 	e.flusher.Flush()
 }
 
@@ -311,7 +359,7 @@ func (e *sseEmitter) emitDone() {
 func (p *LLMProxy) streamCompletion(w http.ResponseWriter, r *http.Request, messages []ChatMessage) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, `{"error": "streaming unsupported"}`, http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -325,11 +373,11 @@ func (p *LLMProxy) streamCompletion(w http.ResponseWriter, r *http.Request, mess
 		model:   p.Model,
 	}
 
-	emit := func(s string) { emitter.emitContent(s) }
-	if err := p.runCompletionLoop(r, messages, emit); err != nil {
+	// A canceled request means the player interrupted: nobody is listening.
+	if _, _, err := p.runCompletionLoop(r, messages, emitter.emitContent); err != nil && r.Context().Err() == nil {
 		log.Printf("LLM proxy error: %v", err)
-		// Make CHRONOS audibly fail in-character rather than going silent.
-		emit("Mes circuits de liaison neuronale subissent une interférence. Répétez, sujet.")
+		// Make the game master audibly fail in-character rather than going silent.
+		emitter.emitContent(p.Engine.Text().Interference)
 	}
 	emitter.emitDone()
 }
@@ -338,9 +386,8 @@ func (p *LLMProxy) streamCompletion(w http.ResponseWriter, r *http.Request, mess
 // part of the OpenAI API surface).
 func (p *LLMProxy) blockingCompletion(w http.ResponseWriter, r *http.Request, messages []ChatMessage) {
 	var full strings.Builder
-	err := p.runCompletionLoop(r, messages, func(s string) { full.WriteString(s) })
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusBadGateway)
+	if _, _, err := p.runCompletionLoop(r, messages, func(s string) { full.WriteString(s) }); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -353,7 +400,7 @@ func (p *LLMProxy) blockingCompletion(w http.ResponseWriter, r *http.Request, me
 		"choices": []map[string]interface{}{
 			{
 				"index":         0,
-				"message":       map[string]string{"role": "assistant", "content": full.String()},
+				"message":       map[string]string{"role": "assistant", "content": strings.TrimSpace(full.String())},
 				"finish_reason": "stop",
 			},
 		},
@@ -361,57 +408,65 @@ func (p *LLMProxy) blockingCompletion(w http.ResponseWriter, r *http.Request, me
 }
 
 // runCompletionLoop streams upstream completions, emits narration text,
-// executes native tool calls, and requests continuations until the LLM
-// finishes naturally (no more tool calls).
-func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, emit func(string)) error {
+// executes tool calls, and requests continuations until the LLM finishes
+// naturally (no more tool calls). It returns the messages with the assistant
+// and tool messages appended, and the last sound effect a tool fired.
+func (p *LLMProxy) runCompletionLoop(r *http.Request, messages []ChatMessage, emit func(string)) ([]ChatMessage, string, error) {
+	lastSFX := ""
 	for round := 0; round < maxActionRounds; round++ {
-		resp, err := p.callUpstream(messages)
+		resp, err := p.callUpstream(r.Context(), messages)
 		if err != nil {
-			return err
+			return messages, lastSFX, err
 		}
-
-		assistantText, toolCalls, err := p.consumeUpstream(r, resp, emit)
+		assistantText, toolCalls, err := consumeUpstream(resp, emit)
 		resp.Body.Close()
 		if err != nil {
-			return err
+			return messages, lastSFX, err
 		}
+		log.Printf("runCompletionLoop: round=%d toolCalls=%d text=%q", round, len(toolCalls), assistantText)
 
+		// Fallback: the LLM wrote tool calls as text instead of using the API.
 		if len(toolCalls) == 0 {
-			return nil // finished without (further) tool calls
+			toolCalls = parseTextToolCalls(assistantText)
 		}
 
-		// Append the assistant message with tool calls, then one tool role
-		// message per call with the real game engine result.
 		messages = append(messages, ChatMessage{
 			Role:      "assistant",
-			Content:   assistantText,
+			Content:   stripTextToolCalls(assistantText),
 			ToolCalls: toolCalls,
 		})
-
+		if len(toolCalls) == 0 {
+			break // finished without (further) tool calls
+		}
+		// One tool role message per call, with the real game engine result.
 		for _, tc := range toolCalls {
-			resultJSON := p.executeToolCall(tc.Function.Name, tc.Function.Arguments)
-			messages = append(messages, ChatMessage{
-				Role:       "tool",
-				Content:    resultJSON,
-				ToolCallID: tc.ID,
-			})
+			resultJSON, sfx := p.executeToolCall(tc.Function.Name, tc.Function.Arguments)
+			if sfx != "" {
+				lastSFX = sfx
+			}
+			messages = append(messages, ChatMessage{Role: "tool", Content: resultJSON, ToolCallID: tc.ID})
 		}
 	}
-	// Final broadcast after the entire completion loop to ensure the UI
-	// reflects all state changes from this turn.
-	if p.OnGameStateChange != nil {
-		p.OnGameStateChange()
-	}
-	return nil
+	return messages, lastSFX, nil
 }
 
-// consumeUpstream reads the upstream SSE stream, emitting narration text to
-// Unmute while collecting any tool calls. It returns when the stream ends,
-// returning the full assistant text and any accumulated tool calls.
-func (p *LLMProxy) consumeUpstream(r *http.Request, resp *http.Response, emit func(string)) (assistantText string, toolCalls []toolCallChunk, err error) {
+// consumeUpstream reads the upstream SSE stream, emitting narration text
+// while collecting any tool calls. It returns when the stream ends, with the
+// full assistant text and the accumulated tool calls.
+func consumeUpstream(resp *http.Response, emit func(string)) (assistantText string, toolCalls []toolCallChunk, err error) {
 	var full strings.Builder
 
-	// Accumulate tool call fragments by index.
+	// Text is released one sentence at a time, so a tool call the model
+	// wrote as text is stripped before the TTS reads it aloud.
+	spoken := 0 // bytes of full already emitted
+	speakUpTo := func(end int) {
+		if end > spoken {
+			emit(stripTextToolCalls(full.String()[spoken:end]))
+			spoken = end
+		}
+	}
+
+	// Tool calls arrive in fragments, keyed by index.
 	type toolAccum struct {
 		id        string
 		name      string
@@ -423,12 +478,6 @@ func (p *LLMProxy) consumeUpstream(r *http.Request, resp *http.Response, emit fu
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
-		select {
-		case <-r.Context().Done():
-			return full.String(), nil, nil // player interrupted (VAD); stop cleanly
-		default:
-		}
-
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data:") {
 			continue
@@ -443,32 +492,25 @@ func (p *LLMProxy) consumeUpstream(r *http.Request, resp *http.Response, emit fu
 				Delta struct {
 					Content   string `json:"content"`
 					ToolCalls []struct {
-						Index    int    `json:"index"`
-						ID       string `json:"id"`
-						Type     string `json:"type"`
-						Function struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
-						} `json:"function"`
+						Index    int          `json:"index"`
+						ID       string       `json:"id"`
+						Function toolFunction `json:"function"`
 					} `json:"tool_calls"`
 				} `json:"delta"`
-				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil || len(chunk.Choices) == 0 {
 			continue
 		}
+		delta := chunk.Choices[0].Delta
 
-		choice := chunk.Choices[0]
-
-		// Emit narration text.
-		if choice.Delta.Content != "" {
-			full.WriteString(choice.Delta.Content)
-			emit(choice.Delta.Content)
+		// Emit narration text up to the last finished sentence.
+		if delta.Content != "" {
+			full.WriteString(delta.Content)
+			speakUpTo(strings.LastIndexAny(full.String(), ".!?\n") + 1)
 		}
 
-		// Accumulate tool call fragments.
-		for _, tc := range choice.Delta.ToolCalls {
+		for _, tc := range delta.ToolCalls {
 			accum, ok := toolAccums[tc.Index]
 			if !ok {
 				accum = &toolAccum{}
@@ -486,22 +528,19 @@ func (p *LLMProxy) consumeUpstream(r *http.Request, resp *http.Response, emit fu
 	if err := scanner.Err(); err != nil {
 		return full.String(), nil, err
 	}
+	speakUpTo(full.Len())
 
-	// Collect tool calls in index order.
-	for i := 0; i < len(toolAccums); i++ {
-		accum, ok := toolAccums[i]
-		if !ok {
-			continue
+	// Indices need not start at 0 or be contiguous; keep their order.
+	for _, i := range slices.Sorted(maps.Keys(toolAccums)) {
+		accum := toolAccums[i]
+		if accum.id == "" {
+			accum.id = nextTextCallID() // the tool message must reference an ID
 		}
-		tc := toolCallChunk{
-			ID:   accum.id,
-			Type: "function",
-		}
-		tc.Function.Name = accum.name
-		tc.Function.Arguments = accum.arguments.String()
-		toolCalls = append(toolCalls, tc)
-		log.Printf("consumeUpstream: collected tool call: %s(%s)", tc.Function.Name, tc.Function.Arguments)
+		toolCalls = append(toolCalls, toolCallChunk{
+			ID:       accum.id,
+			Type:     "function",
+			Function: toolFunction{Name: accum.name, Arguments: accum.arguments.String()},
+		})
 	}
-
 	return full.String(), toolCalls, nil
 }

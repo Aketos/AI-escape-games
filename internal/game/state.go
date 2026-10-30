@@ -1,27 +1,14 @@
 package game
 
-// FunctionCall defines a schema for an LLM function tool.
+import (
+	"maps"
+	"slices"
+)
+
+// FunctionCall is a tool call made by the LLM.
 type FunctionCall struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Parameters  *Parameters            `json:"parameters,omitempty"`
-	Arguments   map[string]interface{} `json:"arguments,omitempty"` // For incoming calls
-}
-
-type Parameters struct {
-	Type       string              `json:"type"`
-	Properties map[string]Property `json:"properties"`
-	Required   []string            `json:"required,omitempty"`
-}
-
-type Property struct {
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-}
-
-// FunctionCallsDoc represents the document wrapping multiple function calls schemas.
-type FunctionCallsDoc struct {
-	Functions []FunctionCall `json:"functions"`
+	Name      string
+	Arguments map[string]interface{}
 }
 
 // InventoryItem represents an item held by the player.
@@ -63,6 +50,7 @@ type RoomItem struct {
 	Unlocks              []string `json:"unlocks,omitempty"`
 	WinsGame             bool     `json:"wins_game,omitempty"`
 	Type                 string   `json:"type"`
+	Used                 bool     `json:"-"` // true once use_item succeeded on it
 }
 
 // RoomState defines a physical location in the game and its interactive state.
@@ -72,19 +60,42 @@ type RoomState struct {
 	Description string               `json:"description"`
 	Image       string               `json:"image,omitempty"`
 	Items       map[string]*RoomItem `json:"items"`
+	Exits       map[string]string    `json:"exits,omitempty"` // reachable room ID -> door item ID in this room ("" = always open)
+	ItemOrder   []string             `json:"-"`               // item IDs in JSON declaration order
+	Visited     bool                 `json:"-"`               // true once the player has been in this room
 }
 
 // GameState is the overarching Finite State Machine (FSM) holding all truth.
 // Modifications to this should be protected by a mutex if accessed concurrently.
 type GameState struct {
-	Player PlayerState
-	Rooms  map[string]*RoomState
-	Won    bool
+	Player    PlayerState
+	Rooms     map[string]*RoomState
+	RoomOrder []string // room IDs in JSON declaration order
+	Won       bool
+	Text      *Text // engine sentences in the scenario's language
 }
 
-// NewGameState initializes a blank game state.
+// orderedItemIDs returns item IDs in JSON declaration order. Rooms built in
+// code (tests) have no ItemOrder, so fall back to sorted keys.
+func orderedItemIDs(room *RoomState) []string {
+	if len(room.ItemOrder) > 0 {
+		return room.ItemOrder
+	}
+	return slices.Sorted(maps.Keys(room.Items))
+}
+
+// orderedRoomIDs is orderedItemIDs for rooms.
+func orderedRoomIDs(gs *GameState) []string {
+	if len(gs.RoomOrder) > 0 {
+		return gs.RoomOrder
+	}
+	return slices.Sorted(maps.Keys(gs.Rooms))
+}
+
+// NewGameState initializes a blank game state with French engine text.
 func NewGameState() *GameState {
 	return &GameState{
 		Rooms: make(map[string]*RoomState),
+		Text:  Texts["fr"],
 	}
 }
